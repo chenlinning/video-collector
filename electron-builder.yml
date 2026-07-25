@@ -1,0 +1,30 @@
+appId: com.videocollector.desktop
+productName: Video Collector
+copyright: Copyright © 2026 Video Collector
+asar: true
+npmRebuild: false
+electronDist: cache/electron
+directories:
+  output: release
+  buildResources: build
+files:
+  - out/**/*
+  - package.json
+extraResources:
+  - from: D:/Program Files/yt-dlp/yt-dlp.exe
+    to: bin/yt-dlp.exe
+  - from: D:/Program Files/ffmpeg/bin/ffmpeg.exe
+    to: bin/ffmpeg.exe
+  - from: D:/Program Files/ffmpeg/bin/ffprobe.exe
+    to: bin/ffprobe.exe
+win:
+  icon: build/icon.ico
+  target:
+    - target: portable
+      arch:
+        - x64
+artifactName: Video-Collector-${version}-Windows-x64.${ext}
+compression: maximum
+electronLanguages:
+  - zh-CN
+  - en-US

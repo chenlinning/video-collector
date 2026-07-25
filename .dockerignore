@@ -1,0 +1,16 @@
+.git
+.env
+.env.*
+!.env.example
+.idea
+.vscode
+cache
+dist-web
+downloads
+node_modules
+.github
+out
+release
+*.log
+*.tsbuildinfo
+TASK-*.md

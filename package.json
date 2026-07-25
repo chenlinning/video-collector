@@ -1,0 +1,43 @@
+{
+  "name": "video-collector",
+  "version": "0.1.2",
+  "description": "Local-first video collector interface for public media URLs",
+  "author": "Video Collector",
+  "main": "out/main/index.js",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "set \"NODE_PATH=%CD%\\node_modules\" && electron-vite dev",
+    "build": "set \"NODE_PATH=%CD%\\node_modules\" && electron-vite build && node scripts/verify-preload.mjs",
+    "build:web": "vite build --config vite.renderer.config.ts",
+    "preview:web": "vite --config vite.renderer.config.ts",
+    "preview:site": "vite preview --config vite.renderer.config.ts --host 127.0.0.1 --port 4174 --strictPort",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:integration": "vitest run --config vitest.integration.config.ts && node scripts/integration-test.mjs",
+    "package:win": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-win.ps1"
+  },
+  "dependencies": {
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron",
+      "esbuild"
+    ]
+  },
+  "devDependencies": {
+    "@types/node": "26.1.1",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "5.2.0",
+    "electron": "43.2.0",
+    "electron-builder": "26.15.3",
+    "electron-vite": "5.0.0",
+    "typescript": "7.0.2",
+    "vite": "7.3.6",
+    "vitest": "4.1.10"
+  }
+}
