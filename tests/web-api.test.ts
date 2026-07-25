@@ -1,9 +1,13 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createWebVideoCollectorApi, streamResponseToWriter } from "../src/renderer/src/web-api";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createWebVideoCollectorApi, saveWebDownload, streamResponseToWriter } from "../src/renderer/src/web-api";
 
 describe("web video collector API", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it("parses media through the anonymous same-origin API", async () => {
@@ -43,6 +47,27 @@ describe("web video collector API", () => {
     expect(new TextDecoder().decode(writes[0])).toBe("video-data");
     expect(writer.close).toHaveBeenCalledOnce();
     expect(progress.at(-1)).toBe(100);
+  });
+
+  it("attaches the fallback download link before clicking it", async () => {
+    const anchor = {
+      href: "",
+      download: "",
+      click: vi.fn(),
+      remove: vi.fn()
+    };
+    const append = vi.fn();
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("document", {
+      createElement: vi.fn(() => anchor),
+      body: { append }
+    });
+
+    await saveWebDownload("task-1", "video.mp4");
+
+    expect(append).toHaveBeenCalledWith(anchor);
+    expect(anchor.click).toHaveBeenCalledOnce();
+    expect(anchor.remove).toHaveBeenCalledOnce();
   });
 
   it("emits a cancelled state after cancelling an anonymous task", async () => {

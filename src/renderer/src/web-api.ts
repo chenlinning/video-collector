@@ -198,7 +198,9 @@ export async function saveWebDownload(
     const anchor = document.createElement("a");
     anchor.href = downloadPath;
     anchor.download = fileName || "video.mp4";
+    document.body.append(anchor);
     anchor.click();
+    anchor.remove();
     onProgress?.(100);
     return null;
   }
