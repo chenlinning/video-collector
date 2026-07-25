@@ -63,6 +63,24 @@ func TestServerAllowsAnonymousAPIWithoutLogin(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, requestStatus(handler, "/sso/entry?ticket=unused"))
 }
 
+func TestServerAllowsEmbeddingFromOtherSites(t *testing.T) {
+	manager, err := videocollector.NewManager(videocollector.ManagerConfig{
+		Root: t.TempDir(), MaxConcurrent: 1,
+	}, serverEngineStub{})
+	require.NoError(t, err)
+
+	webRoot := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(webRoot, "index.html"), []byte("<html>collector</html>"), 0o600))
+	handler, err := NewServer(ServerConfig{Manager: manager, WebRoot: webRoot})
+	require.NoError(t, err)
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/", nil))
+	require.Equal(t, http.StatusOK, response.Code)
+	require.Contains(t, response.Header().Get("Content-Security-Policy"), "frame-ancestors *")
+	require.Empty(t, response.Header().Get("X-Frame-Options"))
+}
+
 func TestServerRateLimitsAnonymousParseRequestsByIP(t *testing.T) {
 	manager, err := videocollector.NewManager(videocollector.ManagerConfig{
 		Root: t.TempDir(), MaxConcurrent: 1,
