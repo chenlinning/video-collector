@@ -4,8 +4,9 @@
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.238 0.0036 106.64);
   --card-foreground: oklch(0.985 0 0);
-  --primary: oklch(1 0 0);
-  --primary-foreground: oklch(0.205 0 0);
+  --primary: #5a8b67;
+  --primary-hover: #4a7355;
+  --primary-foreground: #ffffff;
   --secondary: oklch(0.3 0.0036 106.64);
   --muted: oklch(0.269 0.0036 106.64);
   --muted-foreground: oklch(0.708 0 0);
@@ -18,8 +19,8 @@
   --brand-strong: #4a7355;
   --brand-soft: #9db29a;
   --card-shadow: 0 28px 80px rgba(0, 0, 0, .18);
-  --button-shadow: 0 12px 28px rgba(0, 0, 0, .18);
-  font-family: Inter, "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif;
+  --button-shadow: 0 1px 2px rgba(0, 0, 0, .05);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   color: var(--foreground);
   background: var(--background);
   font-synthesis: none;
@@ -32,8 +33,9 @@
   --foreground: oklch(0.205 0 0);
   --card: oklch(0.995 0.002 106.64);
   --card-foreground: oklch(0.205 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
+  --primary: #5a8b67;
+  --primary-hover: #4a7355;
+  --primary-foreground: #ffffff;
   --secondary: oklch(0.93 0.005 106.64);
   --muted: oklch(0.945 0.005 106.64);
   --muted-foreground: oklch(0.48 0.006 106.64);
@@ -46,7 +48,7 @@
   --brand-strong: #4a7355;
   --brand-soft: #4a7355;
   --card-shadow: 0 24px 60px rgba(52, 48, 37, .08);
-  --button-shadow: 0 12px 24px rgba(52, 48, 37, .14);
+  --button-shadow: 0 1px 2px rgba(0, 0, 0, .05);
 }
 
 * { box-sizing: border-box; }
@@ -93,9 +95,10 @@ button { color: inherit; }
 .link-symbol { color: #6f7588; font-size: 20px; transform: rotate(-45deg); }
 .url-input-wrap input { width: 100%; border: 0; outline: 0; background: transparent; color: #f3f4fb; font-size: 14px; }
 .url-input-wrap input::placeholder { color: #565c6d; }
-.primary-button { min-width: 132px; border: 0; border-radius: 15px; padding: 0 18px; display: flex; align-items: center; justify-content: center; gap: 8px; background: linear-gradient(135deg,#755cff,#5b43e9); box-shadow: 0 12px 28px rgba(91,67,233,.28); cursor: pointer; font-weight: 700; font-size: 13px; transition: .2s ease; }
-.primary-button:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.08); }
-.primary-button:disabled { cursor: wait; opacity: .72; }
+.primary-button { min-width: 132px; border: 0; border-radius: 12px; padding: 10px 16px; display: flex; align-items: center; justify-content: center; gap: 8px; background: var(--primary); box-shadow: var(--button-shadow); cursor: pointer; font-weight: 500; font-size: 14px; line-height: 20px; transition: all .2s ease-out; }
+.primary-button:hover:not(:disabled) { background: var(--primary-hover); box-shadow: 0 4px 6px rgba(0, 0, 0, .1); }
+.primary-button:active:not(:disabled) { transform: scale(.98); }
+.primary-button:disabled { cursor: not-allowed; opacity: .5; }
 .support-row { display: flex; gap: 18px; margin-top: 17px; color: #6f7588; font-size: 11px; }
 .support-row span::before { content: "✓"; color: #7464ee; margin-right: 5px; }
 
@@ -144,18 +147,18 @@ button { color: inherit; }
 .format-main strong { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.format-main small { color:#606678; font-size:9px; }
 .format-size { color: #8c92a4; font-size: 10px; }
 .directory-heading { margin-bottom: 10px; }
-.directory-button { width: 100%; min-height: 50px; display: flex; align-items: center; gap: 10px; border: 1px solid rgba(255,255,255,.075); background: rgba(7,10,18,.48); border-radius: 12px; padding: 0 14px; cursor: pointer; }
-.directory-button .icon { color: #7463ed; }.directory-button span { min-width: 0; flex: 1; color: #8b91a2; text-align: left; font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.directory-button b { color: #a597ff; font-size: 10px; }
+.directory-button { width: 100%; min-height: 50px; display: flex; align-items: center; gap: 10px; border: 1px solid rgba(255,255,255,.075); background: rgba(7,10,18,.48); border-radius: 12px; padding: 10px 16px; cursor: pointer; font-size: 14px; font-weight: 500; transition: all .2s ease-out; }
+.directory-button .icon { color: #7463ed; }.directory-button span { min-width: 0; flex: 1; color: #8b91a2; text-align: left; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.directory-button b { color: #a597ff; font-size: 12px; }
 
 .progress-panel { margin-top: 15px; border-radius: 13px; padding: 13px; background: rgba(8,11,20,.8); border: 1px solid rgba(112,91,232,.2); }
 .progress-copy { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 9px; font-size: 10px; }
 .progress-copy strong { color: #c6c0ff; }.progress-copy span { color: #666d80; }.progress-copy b { font-size: 11px; }
 .progress-track { height: 5px; margin-top: 9px; background:#202436; border-radius:999px; overflow:hidden; }.progress-track span { display:block; height:100%; background:linear-gradient(90deg,#6854e8,#9b79ff); border-radius:inherit; transition: width .25s ease; }
 .progress-panel > p { margin: 9px 0 0; color:#ff9aae; font-size:10px; }.state-completed { border-color:rgba(74,223,166,.25); }.state-completed .progress-track span { background:#4adfa6; }
-.completion-actions { display:flex; gap:8px; margin-top:11px; }.completion-actions button { border:1px solid rgba(255,255,255,.09); background:#191d2b; border-radius:8px; padding:7px 10px; font-size:10px; cursor:pointer; }
+.completion-actions { display:flex; gap:8px; margin-top:11px; }.completion-actions button { border:1px solid rgba(255,255,255,.09); background:#191d2b; border-radius:12px; padding:10px 16px; font-size:14px; font-weight:500; cursor:pointer; transition:all .2s ease-out; }
 .download-actions { margin-top: 17px; }
-.download-button, .cancel-button { width:100%; min-height:52px; border:0; border-radius:13px; display:flex; align-items:center; justify-content:center; gap:9px; cursor:pointer; font-weight:800; }
-.download-button { background: linear-gradient(135deg,#7159f5,#543ed7); box-shadow:0 13px 30px rgba(77,57,196,.27); }.download-button small { margin-left:5px; color:#cfc9ff; font-size:9px; }.download-button:hover { filter:brightness(1.08); }.download-button:disabled { opacity:.45; cursor:not-allowed; }
+.download-button, .cancel-button { width:100%; min-height:52px; border:0; border-radius:12px; display:flex; align-items:center; justify-content:center; gap:9px; cursor:pointer; font-weight:500; font-size:14px; line-height:20px; transition:all .2s ease-out; }
+.download-button { background:var(--primary); box-shadow:var(--button-shadow); }.download-button small { margin-left:5px; color:#e8f0ea; font-size:10px; }.download-button:hover:not(:disabled) { background:var(--primary-hover); box-shadow:0 4px 6px rgba(0,0,0,.1); }.download-button:active:not(:disabled) { transform:scale(.98); }.download-button:disabled { opacity:.5; cursor:not-allowed; }
 .cancel-button { color:#ff9aae; background:rgba(255,92,121,.08); border:1px solid rgba(255,92,121,.18); }
 
 .status-card, .history-card { border-radius: 20px; padding: 18px; }
@@ -202,7 +205,7 @@ button { color: inherit; }
 .url-input-wrap input { color: var(--foreground); }
 .url-input-wrap input::placeholder { color: color-mix(in oklch, var(--muted-foreground) 70%, transparent); }
 .primary-button, .download-button { color: var(--primary-foreground); background: var(--primary); box-shadow: var(--button-shadow); }
-.primary-button:hover:not(:disabled), .download-button:hover:not(:disabled) { background: color-mix(in oklch, var(--primary) 90%, var(--brand-soft)); filter: none; }
+.primary-button:hover:not(:disabled), .download-button:hover:not(:disabled) { background: var(--primary-hover); box-shadow: 0 4px 6px rgba(0, 0, 0, .1); filter: none; }
 .spinner { border-color: color-mix(in oklch, var(--primary-foreground) 32%, transparent); border-top-color: var(--primary-foreground); }
 .support-row span::before { color: var(--brand-soft); }
 .error-banner { border-color: color-mix(in oklch, var(--destructive) 34%, transparent); background: color-mix(in oklch, var(--destructive) 12%, var(--card)); }
@@ -231,6 +234,7 @@ button { color: inherit; }
 .progress-track span, .state-completed .progress-track span { background: linear-gradient(90deg, var(--brand-strong), var(--brand-soft)); }
 .state-completed { border-color: color-mix(in oklch, var(--brand-soft) 35%, transparent); }
 .completion-actions button { border-color: var(--border); background: var(--accent); }
+.completion-actions button:hover, .directory-button:hover { border-color: color-mix(in oklch, var(--brand) 42%, transparent); background: var(--secondary); }
 .download-button small { color: color-mix(in oklch, var(--primary-foreground) 72%, transparent); }
 .cancel-button { color: color-mix(in oklch, var(--destructive) 78%, white); background: color-mix(in oklch, var(--destructive) 10%, transparent); border-color: color-mix(in oklch, var(--destructive) 24%, transparent); }
 .status-heading { border-color: var(--border); }

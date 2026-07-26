@@ -7,10 +7,11 @@ import type {
   RuntimeStatus,
   VideoCollectorApi
 } from "../../shared/contracts";
+import { resolveLocale, uiCopy, type Locale } from "./i18n";
 import { loadTheme, saveTheme, type Theme } from "./theme";
 import {
   buildPreferencesReadyMessage,
-  readParentTheme,
+  readParentPreferences,
   resolveParentOrigin
 } from "./theme-bridge";
 import { createWebVideoCollectorApi, saveWebDownload } from "./web-api";
@@ -30,15 +31,15 @@ function Icon({ name }: { name: "download" | "folder" | "play" | "clock" | "tras
   return <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">{paths[name]}</svg>;
 }
 
-function formatDuration(seconds?: number): string {
-  if (!seconds) return "未知时长";
+function formatDuration(seconds: number | undefined, locale: Locale): string {
+  if (!seconds) return uiCopy[locale].unknownDuration;
   const minutes = Math.floor(seconds / 60);
   const remainder = Math.round(seconds % 60);
   return `${minutes}:${remainder.toString().padStart(2, "0")}`;
 }
 
-function formatBytes(bytes?: number): string {
-  if (!bytes) return "大小未知";
+function formatBytes(bytes: number | undefined, locale: Locale): string {
+  if (!bytes) return uiCopy[locale].unknownSize;
   const units = ["B", "KB", "MB", "GB"];
   let value = bytes;
   let unit = 0;
@@ -54,19 +55,12 @@ function readableError(error: unknown): string {
   return message.replace(/^Error invoking remote method '[^']+':\s*/, "");
 }
 
-function stateText(progress: DownloadProgress): string {
-  const labels: Record<DownloadProgress["state"], string> = {
-    starting: "正在启动",
-    downloading: "正在下载",
-    processing: "正在合并",
-    completed: "下载完成",
-    cancelled: "已取消",
-    failed: "下载失败"
-  };
-  return labels[progress.state];
+function stateText(progress: DownloadProgress, locale: Locale): string {
+  return uiCopy[locale].states[progress.state];
 }
 
 export default function App() {
+  const [locale, setLocale] = useState<Locale>(() => resolveLocale(window.navigator.language));
   const [theme, setTheme] = useState<Theme>(() => {
     const initialTheme = loadTheme(window.localStorage);
     document.documentElement.dataset.theme = initialTheme;
@@ -84,6 +78,8 @@ export default function App() {
   const [saveProgress, setSaveProgress] = useState(0);
   const [deleteAt, setDeleteAt] = useState("");
   const [error, setError] = useState("");
+  const copy = uiCopy[locale];
+  const dateLocale = locale === "en" ? "en-US" : "zh-CN";
 
   const selectedFormat = useMemo(
     () => media?.formats.find((format) => format.id === selectedFormatId),
@@ -103,13 +99,19 @@ export default function App() {
   }, [theme]);
 
   useEffect(() => {
+    document.documentElement.lang = locale;
+  }, [locale]);
+
+  useEffect(() => {
     if (window.parent === window) return;
     const parentOrigin = resolveParentOrigin(document.referrer);
     if (!parentOrigin) return;
 
     const handlePreferences = (event: MessageEvent) => {
-      const nextTheme = readParentTheme(event, window.parent, parentOrigin);
-      if (nextTheme) setTheme(nextTheme);
+      const preferences = readParentPreferences(event, window.parent, parentOrigin);
+      if (!preferences) return;
+      setTheme(preferences.theme);
+      setLocale(preferences.locale);
     };
     window.addEventListener("message", handlePreferences);
     window.parent.postMessage(buildPreferencesReadyMessage(), parentOrigin);
@@ -132,7 +134,7 @@ export default function App() {
 
   const handleParse = async () => {
     if (!url.trim()) {
-      setError("请先粘贴视频链接");
+      setError(copy.missingUrl);
       return;
     }
     setError("");
@@ -216,10 +218,10 @@ export default function App() {
           <div className="hero-card">
             <div className="hero-meta">
               <div className="eyebrow"><Icon name="spark" /> PUBLIC MEDIA COLLECTOR</div>
-              <div className="privacy-pill"><span /> {webMode ? "服务器不永久保存 · 未下载 30 分钟删除 · 下载后 15 分钟删除" : "本地处理 · 数据不上传"}</div>
+              <div className="privacy-pill"><span /> {webMode ? copy.retentionNotice : copy.localNotice}</div>
             </div>
-            <h1>收藏喜欢的视频，<em>简单一点。</em></h1>
-            <p>{webMode ? "粘贴公开页面链接，由独立服务完成解析、画质选择与临时下载。" : "粘贴公开页面链接，在本地完成解析、画质选择与下载。"}</p>
+            <h1>{copy.titleLead}<em>{copy.titleEmphasis}</em></h1>
+            <p>{webMode ? copy.webDescription : copy.localDescription}</p>
             <div className="url-composer">
               <div className="url-input-wrap">
                 <span className="link-symbol">↗</span>
@@ -230,7 +232,7 @@ export default function App() {
                   onKeyDown={(event) => {
                     if (event.key === "Enter") void handleParse();
                   }}
-                  placeholder="粘贴 TikTok、YouTube、Bilibili 等公开视频链接"
+                  placeholder={copy.urlPlaceholder}
                   spellCheck={false}
                 />
               </div>
@@ -241,29 +243,29 @@ export default function App() {
                 disabled={isParsing}
               >
                 {isParsing ? <span className="spinner" /> : <Icon name="spark" />}
-                {isParsing ? "解析中" : "开始解析"}
+                {isParsing ? copy.parsing : copy.parse}
               </button>
             </div>
             <div className="support-row">
-              <span>公开内容</span><span>多画质</span><span>音视频合并</span><span>断点续传</span>
+              <span>{copy.publicContent}</span><span>{copy.multipleQualities}</span><span>{copy.avMerge}</span><span>{copy.resume}</span>
             </div>
           </div>
 
-          {error && <div className="error-banner" role="alert"><strong>未能完成操作</strong><span>{error}</span></div>}
+          {error && <div className="error-banner" role="alert"><strong>{copy.operationFailed}</strong><span>{error}</span></div>}
 
           {!media && !isParsing && (
             <div className="empty-card">
               <div className="empty-icon"><Icon name="download" /></div>
-              <h2>准备好开始收藏</h2>
-              <p>输入一个你有权保存的公开视频链接，解析结果会显示在这里。</p>
+              <h2>{copy.emptyTitle}</h2>
+              <p>{copy.emptyDescription}</p>
             </div>
           )}
 
           {isParsing && (
             <div className="empty-card loading-card">
               <div className="orbit"><span /><span /><span /></div>
-              <h2>正在读取媒体信息</h2>
-              <p>识别平台、封面、时长和可用画质……</p>
+              <h2>{copy.loadingTitle}</h2>
+              <p>{copy.loadingDescription}</p>
             </div>
           )}
 
@@ -271,8 +273,8 @@ export default function App() {
             <section className="result-card" data-testid="media-result">
               <div className="media-summary">
                 <div className="cover-wrap">
-                  {media.thumbnail ? <img src={media.thumbnail} alt="视频封面" /> : <Icon name="play" />}
-                  <span className="duration-badge"><Icon name="clock" />{formatDuration(media.duration)}</span>
+                  {media.thumbnail ? <img src={media.thumbnail} alt={copy.thumbnailAlt} /> : <Icon name="play" />}
+                  <span className="duration-badge"><Icon name="clock" />{formatDuration(media.duration, locale)}</span>
                 </div>
                 <div className="media-copy">
                   <div className="platform-tag">{media.extractor}</div>
@@ -282,8 +284,8 @@ export default function App() {
               </div>
 
               <div className="section-heading">
-                <div><span>01</span><h3>选择下载格式</h3></div>
-                <small>{media.formats.length} 个可用选项</small>
+                <div><span>01</span><h3>{copy.chooseFormat}</h3></div>
+                <small>{copy.availableOptions(media.formats.length)}</small>
               </div>
               <div className="format-list">
                 {media.formats.map((format: MediaFormat) => (
@@ -297,25 +299,25 @@ export default function App() {
                     />
                     <span className="radio-indicator" />
                     <span className="format-main"><strong>{format.label}</strong><small>{format.id}</small></span>
-                    <span className="format-size">{formatBytes(format.approximateBytes)}</span>
+                    <span className="format-size">{formatBytes(format.approximateBytes, locale)}</span>
                   </label>
                 ))}
               </div>
 
               {!webMode && <>
                 <div className="section-heading directory-heading">
-                  <div><span>02</span><h3>保存位置</h3></div>
+                  <div><span>02</span><h3>{copy.saveLocation}</h3></div>
                 </div>
                 <button className="directory-button" onClick={() => void handleChooseDirectory()}>
-                  <Icon name="folder" /><span>{directory || "请选择保存目录"}</span><b>更改</b>
+                  <Icon name="folder" /><span>{directory || copy.chooseDirectory}</span><b>{copy.change}</b>
                 </button>
               </>}
 
               {progress && (
                 <div className={`progress-panel state-${progress.state}`}>
                   <div className="progress-copy">
-                    <strong>{stateText(progress)}</strong>
-                    <span>{progress.speed || ""}{progress.eta ? ` · 剩余 ${progress.eta}` : ""}</span>
+                    <strong>{stateText(progress, locale)}</strong>
+                    <span>{progress.speed || ""}{progress.eta ? ` · ${copy.remaining(progress.eta)}` : ""}</span>
                     <b>{Math.round(progress.percent)}%</b>
                   </div>
                   <div className="progress-track"><span style={{ width: `${progress.percent}%` }} /></div>
@@ -324,24 +326,24 @@ export default function App() {
                     <div className="completion-actions">
                       {webMode ? (
                         <button disabled={isSaving} onClick={() => void handleSaveWebDownload()}>
-                          {isSaving ? `保存中 ${saveProgress}%` : "下载到本机"}
+                          {isSaving ? copy.savingProgress(saveProgress) : copy.downloadLocal}
                         </button>
                       ) : <>
-                        <button onClick={() => void api.openPath(progress.outputPath!)}>打开视频</button>
-                        <button onClick={() => void api.showInFolder(progress.outputPath!)}>所在目录</button>
+                        <button onClick={() => void api.openPath(progress.outputPath!)}>{copy.openVideo}</button>
+                        <button onClick={() => void api.showInFolder(progress.outputPath!)}>{copy.showInFolder}</button>
                       </>}
                     </div>
                   )}
-                  {webMode && deleteAt && <p>服务器临时文件将在 {new Date(deleteAt).toLocaleString("zh-CN")} 删除</p>}
+                  {webMode && deleteAt && <p>{copy.deleteAt(new Date(deleteAt).toLocaleString(dateLocale))}</p>}
                 </div>
               )}
 
               <div className="download-actions">
                 {activeDownload ? (
-                  <button className="cancel-button" onClick={() => void handleCancel()}>取消任务</button>
+                  <button className="cancel-button" onClick={() => void handleCancel()}>{copy.cancelTask}</button>
                 ) : (
                   <button className="download-button" onClick={() => void handleDownload()} disabled={!selectedFormat || (!directory && !webMode)}>
-                    <Icon name="download" /><span>{webMode ? "准备视频" : "下载到本机"}</span><small>{selectedFormat?.extension.toUpperCase() || ""}</small>
+                    <Icon name="download" /><span>{webMode ? copy.prepareVideo : copy.downloadLocal}</span><small>{selectedFormat?.extension.toUpperCase() || ""}</small>
                   </button>
                 )}
               </div>
@@ -351,42 +353,42 @@ export default function App() {
 
         <aside className="sidebar">
           <section className="status-card">
-            <div className="status-heading"><span className="status-dot" /><strong>{webMode ? "在线引擎已就绪" : "本地引擎已就绪"}</strong></div>
+            <div className="status-heading"><span className="status-dot" /><strong>{webMode ? copy.onlineReady : copy.localReady}</strong></div>
             <dl>
-              <div><dt>yt-dlp</dt><dd>{runtime?.ytDlpVersion || "检测中"}</dd></div>
-              <div><dt>FFmpeg</dt><dd>{runtime?.ffmpegVersion.split(" ")[0] || "检测中"}</dd></div>
+              <div><dt>yt-dlp</dt><dd>{runtime?.ytDlpVersion || copy.checking}</dd></div>
+              <div><dt>FFmpeg</dt><dd>{runtime?.ffmpegVersion.split(" ")[0] || copy.checking}</dd></div>
             </dl>
           </section>
 
           {!webMode && <section className="history-card">
             <div className="history-heading">
-              <div><span>最近下载</span><small>{history.length} 条记录</small></div>
-              {history.length > 0 && <button title="清空历史" onClick={() => void handleClearHistory()}><Icon name="trash" /></button>}
+              <div><span>{copy.recentDownloads}</span><small>{copy.records(history.length)}</small></div>
+              {history.length > 0 && <button title={copy.clearHistory} onClick={() => void handleClearHistory()}><Icon name="trash" /></button>}
             </div>
             <div className="history-list">
               {history.length === 0 ? (
-                <div className="history-empty"><Icon name="clock" /><p>完成的下载会保存在这里</p></div>
+                <div className="history-empty"><Icon name="clock" /><p>{copy.historyEmpty}</p></div>
               ) : history.map((item) => (
                 <article className="history-item" key={item.id}>
                   <div className="history-play"><Icon name="play" /></div>
-                  <div><strong>{item.title}</strong><span>{new Date(item.completedAt).toLocaleString("zh-CN")}</span></div>
-                  <button title="在文件夹中显示" onClick={() => void api.showInFolder(item.outputPath)}><Icon name="folder" /></button>
+                  <div><strong>{item.title}</strong><span>{new Date(item.completedAt).toLocaleString(dateLocale)}</span></div>
+                  <button title={copy.showInFolder} onClick={() => void api.showInFolder(item.outputPath)}><Icon name="folder" /></button>
                 </article>
               ))}
             </div>
           </section>}
 
           {webMode && <section className="history-card">
-            <div className="history-heading"><div><span>临时文件</span><small>自动清理</small></div></div>
+            <div className="history-heading"><div><span>{copy.temporaryFiles}</span><small>{copy.automaticCleanup}</small></div></div>
             <div className="history-empty">
               <Icon name="clock" />
-              <p>文件仅临时保存在服务器；未点击下载 30 分钟自动删除，点击下载后 15 分钟自动删除。</p>
+              <p>{copy.retentionDetails}</p>
             </div>
           </section>}
 
           <div className="legal-note">
-            <strong>尊重创作者与平台规则</strong>
-            <p>仅保存你拥有权利或已获授权的公开内容，不支持 DRM、付费或权限受限媒体。</p>
+            <strong>{copy.legalTitle}</strong>
+            <p>{copy.legalDescription}</p>
           </div>
         </aside>
       </main>

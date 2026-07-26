@@ -1,4 +1,5 @@
 import type { Theme } from "./theme";
+import type { Locale } from "./i18n";
 
 interface MessageEventLike {
   data: unknown;
@@ -23,11 +24,16 @@ export function buildPreferencesReadyMessage() {
   };
 }
 
-export function readParentTheme(
+export interface EmbeddedPreferences {
+  theme: Theme;
+  locale: Locale;
+}
+
+export function readParentPreferences(
   event: MessageEventLike,
   parentWindow: Window,
   parentOrigin: string
-): Theme | null {
+): EmbeddedPreferences | null {
   if (event.origin !== parentOrigin || event.source !== parentWindow) return null;
   if (!event.data || typeof event.data !== "object") return null;
 
@@ -37,6 +43,10 @@ export function readParentTheme(
   }
   if (!data.payload || typeof data.payload !== "object") return null;
 
-  const theme = (data.payload as Record<string, unknown>).theme;
-  return theme === "light" || theme === "dark" ? theme : null;
+  const payload = data.payload as Record<string, unknown>;
+  const theme = payload.theme;
+  const locale = payload.locale;
+  if (theme !== "light" && theme !== "dark") return null;
+  if (locale !== "zh-CN" && locale !== "en") return null;
+  return { theme, locale };
 }
