@@ -32,6 +32,7 @@ type ServerConfig struct {
 	ParseRateWindow time.Duration
 	TaskRateWindow  time.Duration
 	TrustProxy      bool
+	EgressStatus    func() string
 	Now             func() time.Time
 }
 
@@ -42,6 +43,7 @@ type Server struct {
 	trustProxy   bool
 	parseLimiter *rateLimiter
 	taskLimiter  *rateLimiter
+	egressStatus func() string
 	mux          *http.ServeMux
 }
 
@@ -61,6 +63,9 @@ func NewServer(config ServerConfig) (*Server, error) {
 	if config.TaskRateWindow <= 0 {
 		config.TaskRateWindow = time.Hour
 	}
+	if config.EgressStatus == nil {
+		config.EgressStatus = func() string { return "off" }
+	}
 	webRoot, err := filepath.Abs(strings.TrimSpace(config.WebRoot))
 	if err != nil {
 		return nil, err
@@ -73,6 +78,7 @@ func NewServer(config ServerConfig) (*Server, error) {
 		trustProxy:   config.TrustProxy,
 		parseLimiter: newRateLimiter(config.ParseRateLimit, config.ParseRateWindow, config.Now),
 		taskLimiter:  newRateLimiter(config.TaskRateLimit, config.TaskRateWindow, config.Now),
+		egressStatus: config.EgressStatus,
 		mux:          http.NewServeMux(),
 	}
 	server.routes()
@@ -124,6 +130,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{
 		"status": "ok", "ytDlpVersion": s.runtime.YTDLPVersion, "ffmpegVersion": s.runtime.FFmpegVersion,
 		"whisperVersion": s.runtime.WhisperVersion, "whisperModel": s.runtime.WhisperModel,
+		"egressStatus": s.egressStatus(),
 	})
 }
 

@@ -81,9 +81,10 @@ func TestHealthIncludesCompleteMediaRuntime(t *testing.T) {
 	webRoot := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(webRoot, "index.html"), []byte("<html>collector</html>"), 0o600))
 	handler, err := NewServer(ServerConfig{
-		Manager: manager,
-		WebRoot: webRoot,
-		Runtime: RuntimeStatus{YTDLPVersion: "yt", FFmpegVersion: "ffmpeg", WhisperVersion: "whisper.cpp 1.8.6", WhisperModel: "ggml-base.bin"},
+		Manager:      manager,
+		WebRoot:      webRoot,
+		Runtime:      RuntimeStatus{YTDLPVersion: "yt", FFmpegVersion: "ffmpeg", WhisperVersion: "whisper.cpp 1.8.6", WhisperModel: "ggml-base.bin"},
+		EgressStatus: func() string { return "degraded" },
 	})
 	require.NoError(t, err)
 
@@ -92,6 +93,8 @@ func TestHealthIncludesCompleteMediaRuntime(t *testing.T) {
 	require.Equal(t, http.StatusOK, response.Code)
 	require.Contains(t, response.Body.String(), "whisper.cpp 1.8.6")
 	require.Contains(t, response.Body.String(), "ggml-base.bin")
+	require.Contains(t, response.Body.String(), `"egressStatus":"degraded"`)
+	require.NotContains(t, response.Body.String(), "10.77.0.2")
 }
 
 func TestServerAllowsEmbeddingFromOtherSites(t *testing.T) {

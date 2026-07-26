@@ -120,6 +120,13 @@ VIDEO_COLLECTOR_PARSE_RATE_LIMIT=20
 VIDEO_COLLECTOR_TASK_RATE_LIMIT=5
 VIDEO_COLLECTOR_TASK_TIMEOUT_SECONDS=7200
 VIDEO_COLLECTOR_TRUST_PROXY=true
+VIDEO_COLLECTOR_EGRESS_MODE=off
+VIDEO_COLLECTOR_CN_PROXY_URL=
+VIDEO_COLLECTOR_CN_PROXY_SOURCE_HOSTS=
+VIDEO_COLLECTOR_CN_PROXY_ROUTE_TTL_SECONDS=1800
+VIDEO_COLLECTOR_CN_PROXY_CONNECT_TIMEOUT_SECONDS=5
+VIDEO_COLLECTOR_CN_PROXY_BREAKER_FAILURES=3
+VIDEO_COLLECTOR_CN_PROXY_BREAKER_SECONDS=60
 ```
 
 变量含义：
@@ -133,8 +140,137 @@ VIDEO_COLLECTOR_TRUST_PROXY=true
 | `VIDEO_COLLECTOR_TASK_RATE_LIMIT` | 5 | 每个 IP 在 1 小时内创建任务次数 |
 | `VIDEO_COLLECTOR_TASK_TIMEOUT_SECONDS` | 7200 | 单任务硬超时，允许 60–7200 秒；为最长 60 分钟 CPU 转录预留处理时间 |
 | `VIDEO_COLLECTOR_TRUST_PROXY` | true | 信任唯一前置 Nginx 的真实 IP 请求头 |
+| `VIDEO_COLLECTOR_EGRESS_MODE` | `off` | 国内临时出口模式；只允许 `off` 或 `auto` |
+| `VIDEO_COLLECTOR_CN_PROXY_URL` | 空 | `auto` 时必填；只接受固定私有 IPv4 WireGuard 地址上的 `http://` 代理，不允许凭据、路径、查询或片段 |
+| `VIDEO_COLLECTOR_CN_PROXY_SOURCE_HOSTS` | 空 | `auto` 时必填；逗号分隔的受控源页面主机，基础域名同时匹配其子域名 |
+| `VIDEO_COLLECTOR_CN_PROXY_ROUTE_TTL_SECONDS` | 1800 | 国内出口成功后的主机路由缓存，允许 60–3600 秒 |
+| `VIDEO_COLLECTOR_CN_PROXY_CONNECT_TIMEOUT_SECONDS` | 5 | 国内代理连接超时，允许 1–15 秒 |
+| `VIDEO_COLLECTOR_CN_PROXY_BREAKER_FAILURES` | 3 | 连续代理连接失败后熔断，允许 1–10 次 |
+| `VIDEO_COLLECTOR_CN_PROXY_BREAKER_SECONDS` | 60 | 熔断时间，允许 10–600 秒 |
 
 匿名版没有必填密钥。`.env` 不应提交到公开仓库。
+
+### 5.1 国内临时出口（可选）
+
+国内服务器只作为临时网络出口，不是第二套生产环境。浏览器、Nginx、Go API、任务队列、yt-dlp、FFmpeg、Whisper 和全部媒体临时文件仍只在 `47.251.87.147`。国内服务器不得克隆本仓库、运行项目容器、挂载项目缓存或保存媒体文件。
+
+架构：
+
+```text
+47.251.87.147 上的项目容器
+  ├── 默认：直接访问公开平台
+  └── 受控主机且出现地域/IP/网络类失败
+        └── 10.77.0.1 → WireGuard → 10.77.0.2:3128 → 公开平台
+```
+
+实施前必须确认：
+
+- 国内服务器公网 IPv4、Linux 发行版和 CPU 架构。
+- SSH 管理方式、云安全组、UDP 端口可用性和本机防火墙。
+- 公网带宽、月流量、计费规则及云服务商是否允许作为私有服务器间出口。
+- 两个无需登录、Cookie 或 DRM 的公开国内平台验收链接。
+- 示例网段 `10.77.0.0/30` 不与两台服务器现有网络重叠。
+
+无上述信息时只能保持 `VIDEO_COLLECTOR_EGRESS_MODE=off`，不得猜测地址或修改国内服务器。
+
+#### 5.1.1 网络组件
+
+仓库提供无密钥模板：
+
+```text
+deploy/domestic-egress/wg-us.conf.example
+deploy/domestic-egress/wg-cn.conf.example
+deploy/domestic-egress/squid.conf.example
+deploy/domestic-egress/README.md
+```
+
+在两台服务器使用操作系统稳定仓库安装 WireGuard；国内服务器另外安装其发行版维护的 Squid 6/7。私钥必须在各自服务器本地生成并以 `0600` 保存，不能写入 Git、聊天记录、Docker 环境或命令行参数。
+
+安全组和监听要求：
+
+1. 国内服务器 UDP `51820` 只允许来源 `47.251.87.147`。
+2. TCP `3128` 不建立任何公网安全组规则。
+3. Squid 只监听 `10.77.0.2:3128`，只接受来源 `10.77.0.1/32`。
+4. 美国服务器只把 `10.77.0.2/32` 交给 WireGuard，不改变默认路由。
+5. 项目容器不增加 `NET_ADMIN`、host 网络或特权模式。
+6. Squid 拒绝 80/443 以外端口、所有私网/链路本地/元数据/保留目标，并以 `deny all` 结束。
+7. Squid 禁用缓存、关闭包含 URL 的访问日志，不启用 SSL Bump。
+
+安装配置后必须先执行版本对应的语法检查：
+
+```bash
+sudo squid -k parse
+sudo systemctl restart squid
+sudo systemctl enable squid
+sudo ss -lntp | grep 10.77.0.2:3128
+```
+
+#### 5.1.2 纯网络 PoC
+
+从 `47.251.87.147` 验证隧道和代理：
+
+```bash
+sudo wg show wg-video-collector
+ping -c 3 10.77.0.2
+curl --fail --show-error --proxy http://10.77.0.2:3128 https://example.com/ -o /dev/null
+curl --fail --show-error --proxy http://10.77.0.2:3128 http://169.254.169.254/
+```
+
+前三项应成功，元数据地址必须被拒绝。还必须从一台公网主机确认 TCP `3128` 不可达。
+
+随后在项目容器内对一个直连确实受限的公开样本执行 yt-dlp 代理解析和最小完整格式下载。确认：
+
+- 代理解析和浏览器最终下载成功。
+- 国内服务器没有项目目录、媒体文件或对象缓存。
+- 未列入受控主机的海外平台继续直连。
+- 代理停止时非受限站点仍可用。
+
+#### 5.1.3 应用启用
+
+网络 PoC 通过后才允许在 `/opt/video-collector/.env` 写入：
+
+```dotenv
+VIDEO_COLLECTOR_EGRESS_MODE=auto
+VIDEO_COLLECTOR_CN_PROXY_URL=http://10.77.0.2:3128
+VIDEO_COLLECTOR_CN_PROXY_SOURCE_HOSTS=bilibili.com,b23.tv
+VIDEO_COLLECTOR_CN_PROXY_ROUTE_TTL_SECONDS=1800
+VIDEO_COLLECTOR_CN_PROXY_CONNECT_TIMEOUT_SECONDS=5
+VIDEO_COLLECTOR_CN_PROXY_BREAKER_FAILURES=3
+VIDEO_COLLECTOR_CN_PROXY_BREAKER_SECONDS=60
+```
+
+不要设置容器级 `HTTP_PROXY`、`HTTPS_PROXY` 或 `ALL_PROXY`。应用只为当前任务的 yt-dlp 和图片 HTTP 请求注入受信任代理；本地 FFmpeg、Whisper 和上传文件转录不会访问代理。
+
+启用并检查：
+
+```bash
+cd /opt/video-collector
+docker compose config
+docker compose up -d --no-build
+curl -fsS http://127.0.0.1:8787/health
+```
+
+`egressStatus` 只返回：
+
+- `off`：功能关闭。
+- `available`：自动模式可接受备用出口任务。
+- `degraded`：存在连接失败或处于半开恢复阶段。
+- `unavailable`：连续连接失败后正在熔断；非受限站点仍直接访问。
+
+接口不会返回代理 URL、WireGuard 地址、密钥或域名规则。同一任务最多切换一次出口；解析、视频、音频、字幕、图片与 URL 转录输入固定使用同一出口，切换前删除当前尝试的部分文件。
+
+#### 5.1.4 关闭与回滚
+
+无需回滚镜像即可立即关闭：
+
+```bash
+cd /opt/video-collector
+sed -i 's/^VIDEO_COLLECTOR_EGRESS_MODE=.*/VIDEO_COLLECTOR_EGRESS_MODE=off/' .env
+docker compose up -d --no-build
+curl -fsS http://127.0.0.1:8787/health
+```
+
+确认返回 `"egressStatus":"off"`。随后可停止国内 Squid 和 WireGuard；正式网站和非受限站点必须继续工作。
 
 ## 6. 缓存目录
 
@@ -193,7 +329,8 @@ curl -fsS http://127.0.0.1:8787/health
   "ytDlpVersion": "2026.07.04",
   "ffmpegVersion": "ffmpeg version 6.1.2 ...",
   "whisperVersion": "whisper.cpp 1.8.6",
-  "whisperModel": "ggml-base.bin"
+  "whisperModel": "ggml-base.bin",
+  "egressStatus": "off"
 }
 ```
 
@@ -354,6 +491,7 @@ curl -fsS http://127.0.0.1:8787/health
 - `cache` 目录大小。
 - yt-dlp/FFmpeg 失败率。
 - 解析和任务延迟。
+- 自动出口启用时的 `egressStatus`、WireGuard 最近握手、Squid 当前连接数和总流量；不得采集完整 URL。
 
 建议告警：
 
@@ -434,6 +572,9 @@ curl -fsS http://127.0.0.1:8787/health
 | 页面有界面但不能解析 | 是否部署了完整容器而非单独 `dist-web` |
 | 400 无格式 | 平台是否公开、是否需要登录/Cookie、yt-dlp 是否兼容 |
 | TikTok 超时 | 服务器出口网络、DNS、区域限制和 CDN 连接 |
+| `egressStatus` 为 `degraded` | 检查 WireGuard 握手、国内代理连接和受控主机近期失败；非受限站点应仍直连 |
+| `egressStatus` 为 `unavailable` | 代理连续连接失败并熔断；检查国内服务器和私网监听，不要改成公网代理 |
+| `auto` 模式无法启动 | 检查代理是否为固定私有 IPv4 的 `http://host:port`、主机规则和数值范围 |
 | 429 | IP 限流或队列已满；检查是否遭到滥用 |
 | 下载失败 | FFmpeg、临时磁盘、格式 ID 和平台 CDN |
 | 文件已过期 | 首次下载后超过 15 分钟或未领取超过 30 分钟 |
@@ -449,6 +590,9 @@ curl -fsS http://127.0.0.1:8787/health
 - [x] Compose 配置展开通过。
 - [x] 容器状态为 `healthy`。
 - [x] `/health` 返回真实工具版本。
+- [ ] 国内临时出口网络 PoC、安全组和私网监听通过。
+- [ ] `auto` 模式健康状态、熔断和无需换镜像的 `off` 回滚通过。
+- [ ] 国内服务器无项目目录、任务文件、媒体缓存或完整 URL 访问日志。
 - [x] 无需登录即可打开首页和调用 API。
 - [x] 旧 `/sso/entry` 返回 404。
 - [ ] Bilibili 生产解析和下载通过。

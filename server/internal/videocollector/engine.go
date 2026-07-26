@@ -11,6 +11,7 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -40,6 +41,7 @@ type YTDLPEngine struct {
 	whisperPath string
 	modelPath   string
 	resolver    IPResolver
+	egress      *EgressRouter
 }
 
 func NewYTDLPEngine(ytDLPPath, ffmpegPath string, resolver IPResolver) *YTDLPEngine {
@@ -47,11 +49,20 @@ func NewYTDLPEngine(ytDLPPath, ffmpegPath string, resolver IPResolver) *YTDLPEng
 }
 
 func NewYTDLPEngineWithTranscriber(ytDLPPath, ffmpegPath, whisperPath, modelPath string, resolver IPResolver) *YTDLPEngine {
+	return NewYTDLPEngineWithTranscriberAndEgress(ytDLPPath, ffmpegPath, whisperPath, modelPath, resolver, nil)
+}
+
+func NewYTDLPEngineWithTranscriberAndEgress(
+	ytDLPPath, ffmpegPath, whisperPath, modelPath string,
+	resolver IPResolver,
+	egress *EgressRouter,
+) *YTDLPEngine {
 	if resolver == nil {
 		resolver = net.DefaultResolver
 	}
 	return &YTDLPEngine{
-		ytDLPPath: ytDLPPath, ffmpegPath: ffmpegPath, whisperPath: whisperPath, modelPath: modelPath, resolver: resolver,
+		ytDLPPath: ytDLPPath, ffmpegPath: ffmpegPath, whisperPath: whisperPath, modelPath: modelPath,
+		resolver: resolver, egress: egress,
 	}
 }
 
@@ -60,20 +71,13 @@ func (e *YTDLPEngine) Parse(ctx context.Context, sourceURL string) (*MediaInfo, 
 	if err != nil {
 		return nil, err
 	}
-	stdout, stderr, err := retryExtractor(ctx, maxExtractorAttempts, extractorRetryBackoff, func() ([]byte, string, error) {
-		return runCaptured(ctx, e.ytDLPPath, []string{
-			"--no-playlist",
-			"--skip-download",
-			"--dump-single-json",
-			"--no-warnings",
-			"--ffmpeg-location", e.ffmpegPath,
-			"--", parsed.String(),
-		})
+	media, stderr, err := executeWithEgress(ctx, e.egress, parsed.Hostname(), nil, func(decision EgressDecision) (*MediaInfo, string, error) {
+		return e.parseWithDecision(ctx, parsed.String(), decision)
 	})
 	if err != nil {
 		return nil, extractorError(stderr, err)
 	}
-	return NormalizeMediaInfo(json.RawMessage(stdout), parsed.String())
+	return media, nil
 }
 
 func (e *YTDLPEngine) ParseCollection(ctx context.Context, sourceURL string, limit int) (*CollectionInfo, error) {
@@ -84,19 +88,13 @@ func (e *YTDLPEngine) ParseCollection(ctx context.Context, sourceURL string, lim
 	if limit < 1 || limit > 10 {
 		limit = 10
 	}
-	stdout, stderr, err := retryExtractor(ctx, maxExtractorAttempts, extractorRetryBackoff, func() ([]byte, string, error) {
-		return runCaptured(ctx, e.ytDLPPath, []string{
-			"--flat-playlist",
-			"--playlist-end", strconv.Itoa(limit),
-			"--dump-single-json",
-			"--no-warnings",
-			"--", parsed.String(),
-		})
+	collection, stderr, err := executeWithEgress(ctx, e.egress, parsed.Hostname(), nil, func(decision EgressDecision) (*CollectionInfo, string, error) {
+		return e.parseCollectionWithDecision(ctx, parsed.String(), limit, decision)
 	})
 	if err != nil {
 		return nil, extractorError(stderr, err)
 	}
-	return NormalizeCollectionInfo(json.RawMessage(stdout), parsed.String(), limit)
+	return collection, nil
 }
 
 func (e *YTDLPEngine) Download(ctx context.Context, request DownloadRequest, outputDir string, progress func(ProgressUpdate)) (*DownloadResult, error) {
@@ -119,14 +117,20 @@ func (e *YTDLPEngine) Download(ctx context.Context, request DownloadRequest, out
 		return nil, ErrInvalidDownload
 	}
 	request.SourceURL = parsed.String()
-	if kind == TaskKindImage {
-		return e.downloadImage(ctx, request, outputDir)
-	}
-	if kind == TaskKindTranscript {
-		return e.transcribeURL(ctx, request.SourceURL, outputDir, progress)
-	}
-	result, stderr, err := retryExtractor(ctx, maxExtractorAttempts, extractorRetryBackoff, func() (*DownloadResult, string, error) {
-		return e.downloadOnce(ctx, request, outputDir, progress)
+	cleanup := func() error { return cleanupAttemptFiles(outputDir) }
+	result, stderr, err := executeWithEgress(ctx, e.egress, parsed.Hostname(), cleanup, func(decision EgressDecision) (*DownloadResult, string, error) {
+		switch kind {
+		case TaskKindImage:
+			return e.downloadImageOnce(ctx, request, outputDir, decision)
+		case TaskKindTranscript:
+			return retryExtractor(ctx, maxExtractorAttempts, extractorRetryBackoff, func() (*DownloadResult, string, error) {
+				return e.transcribeURLOnce(ctx, request.SourceURL, outputDir, progress, decision)
+			})
+		default:
+			return retryExtractor(ctx, maxExtractorAttempts, extractorRetryBackoff, func() (*DownloadResult, string, error) {
+				return e.downloadOnce(ctx, request, outputDir, progress, decision)
+			})
+		}
 	})
 	if err != nil {
 		return nil, extractorError(stderr, err)
@@ -134,27 +138,28 @@ func (e *YTDLPEngine) Download(ctx context.Context, request DownloadRequest, out
 	return result, nil
 }
 
-func (e *YTDLPEngine) transcribeURL(ctx context.Context, sourceURL, outputDir string, progress func(ProgressUpdate)) (*DownloadResult, error) {
+func (e *YTDLPEngine) transcribeURLOnce(
+	ctx context.Context,
+	sourceURL, outputDir string,
+	progress func(ProgressUpdate),
+	decision EgressDecision,
+) (*DownloadResult, string, error) {
 	if e.whisperPath == "" || e.modelPath == "" {
-		return nil, errors.New("transcription runtime is unavailable")
+		return nil, "", errors.New("transcription runtime is unavailable")
 	}
 	if progress != nil {
 		progress(ProgressUpdate{State: TaskStateDownloading, Percent: 5})
 	}
-	args := []string{
-		"--no-playlist", "--no-warnings", "--max-filesize", "250M",
-		"-f", "bestaudio/best", "-x", "--audio-format", "wav",
-		"--ffmpeg-location", e.ffmpegPath,
-		"-o", filepath.Join(outputDir, "input.%(ext)s"), "--", sourceURL,
-	}
+	args := buildTranscriptionDownloadArgs(sourceURL, outputDir, e.ffmpegPath, decision)
 	if output, err := exec.CommandContext(ctx, e.ytDLPPath, args...).CombinedOutput(); err != nil {
-		return nil, extractorError(string(output), err)
+		return nil, string(output), err
 	}
 	inputPath := findInputFile(outputDir)
 	if inputPath == "" {
-		return nil, errors.New("transcription audio input is missing")
+		return nil, "", errors.New("transcription audio input is missing")
 	}
-	return e.transcribeInput(ctx, inputPath, outputDir, progress)
+	result, err := e.transcribeInput(ctx, inputPath, outputDir, progress)
+	return result, "", err
 }
 
 func (e *YTDLPEngine) transcribeInput(ctx context.Context, inputPath, outputDir string, progress func(ProgressUpdate)) (*DownloadResult, error) {
@@ -249,58 +254,66 @@ func safeCommandOutput(output []byte, fallback error) string {
 	return message
 }
 
-func (e *YTDLPEngine) downloadImage(ctx context.Context, request DownloadRequest, outputDir string) (*DownloadResult, error) {
-	media, err := e.Parse(ctx, request.SourceURL)
+func (e *YTDLPEngine) downloadImageOnce(
+	ctx context.Context,
+	request DownloadRequest,
+	outputDir string,
+	decision EgressDecision,
+) (*DownloadResult, string, error) {
+	media, stderr, err := e.parseWithDecision(ctx, request.SourceURL, decision)
 	if err != nil {
-		return nil, err
+		return nil, stderr, err
 	}
 	image, err := selectMediaImage(media, request.ResourceID)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	parsed, err := ValidatePublicMediaURL(ctx, image.URL, e.resolver)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	client := newSafeHTTPClient(e.resolver)
+	client, err := newSafeHTTPClient(e.resolver, decision)
+	if err != nil {
+		return nil, "", err
+	}
 	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	httpRequest.Header.Set("User-Agent", "VideoCollector/1.0")
 	response, err := client.Do(httpRequest)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, fmt.Errorf("image download failed with status %d", response.StatusCode)
+		return nil, "", fmt.Errorf("image download failed with HTTP Error %d", response.StatusCode)
 	}
 	extension := safeImageExtension(response.Header.Get("Content-Type"), response.Request.URL.String())
 	if extension == "" {
-		return nil, ErrInvalidDownload
+		return nil, "", ErrInvalidDownload
 	}
 	if response.ContentLength > maxImageBytes {
-		return nil, errors.New("image exceeds the 50 MiB limit")
+		return nil, "", errors.New("image exceeds the 50 MiB limit")
 	}
 	outputPath := filepath.Join(outputDir, "output."+extension)
 	output, err := os.OpenFile(outputPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	written, copyErr := io.Copy(output, io.LimitReader(response.Body, maxImageBytes+1))
 	closeErr := output.Close()
 	if copyErr != nil {
-		return nil, copyErr
+		return nil, "", copyErr
 	}
 	if closeErr != nil {
-		return nil, closeErr
+		return nil, "", closeErr
 	}
 	if written > maxImageBytes {
 		_ = os.Remove(outputPath)
-		return nil, errors.New("image exceeds the 50 MiB limit")
+		return nil, "", errors.New("image exceeds the 50 MiB limit")
 	}
-	return &DownloadResult{Path: outputPath, Extension: extension}, nil
+	return &DownloadResult{Path: outputPath, Extension: extension}, "", nil
 }
 
 func selectMediaImage(media *MediaInfo, imageID string) (MediaImage, error) {
@@ -340,14 +353,29 @@ func safeImageExtension(contentType, rawURL string) string {
 	return ""
 }
 
-func newSafeHTTPClient(resolver IPResolver) *http.Client {
+func newSafeHTTPClient(resolver IPResolver, decision EgressDecision) (*http.Client, error) {
 	if resolver == nil {
 		resolver = net.DefaultResolver
 	}
-	dialer := &net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second}
+	connectTimeout := 15 * time.Second
+	var proxyURL *url.URL
+	if decision.Route == EgressCNProxy {
+		var err error
+		proxyURL, err = url.Parse(decision.proxyURL)
+		if err != nil || proxyURL.Scheme != "http" || proxyURL.Host == "" {
+			return nil, errors.New("alternate egress configuration is invalid")
+		}
+		if decision.connectTimeout > 0 {
+			connectTimeout = decision.connectTimeout
+		}
+	}
+	dialer := &net.Dialer{Timeout: connectTimeout, KeepAlive: 30 * time.Second}
 	transport := &http.Transport{
-		Proxy: nil,
+		Proxy: http.ProxyURL(proxyURL),
 		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+			if proxyURL != nil && address == proxyURL.Host {
+				return dialer.DialContext(ctx, network, address)
+			}
 			host, port, err := net.SplitHostPort(address)
 			if err != nil {
 				return nil, ErrUnsafeMediaURL
@@ -373,11 +401,17 @@ func newSafeHTTPClient(resolver IPResolver) *http.Client {
 			_, err := ValidatePublicMediaURL(request.Context(), request.URL.String(), resolver)
 			return err
 		},
-	}
+	}, nil
 }
 
-func (e *YTDLPEngine) downloadOnce(ctx context.Context, request DownloadRequest, outputDir string, progress func(ProgressUpdate)) (*DownloadResult, string, error) {
-	args, err := buildDownloadArgs(request, outputDir, e.ffmpegPath)
+func (e *YTDLPEngine) downloadOnce(
+	ctx context.Context,
+	request DownloadRequest,
+	outputDir string,
+	progress func(ProgressUpdate),
+	decision EgressDecision,
+) (*DownloadResult, string, error) {
+	args, err := buildDownloadArgs(request, outputDir, e.ffmpegPath, decision)
 	if err != nil {
 		return nil, "", err
 	}
@@ -437,7 +471,7 @@ func (e *YTDLPEngine) downloadOnce(ctx context.Context, request DownloadRequest,
 	return &DownloadResult{Path: resolvedPath, Extension: strings.TrimPrefix(filepath.Ext(resolvedPath), ".")}, errorTail.String(), nil
 }
 
-func buildDownloadArgs(request DownloadRequest, outputDir, ffmpegPath string) ([]string, error) {
+func buildDownloadArgs(request DownloadRequest, outputDir, ffmpegPath string, decision EgressDecision) ([]string, error) {
 	kind := request.Kind
 	if kind == "" {
 		kind = TaskKindMedia
@@ -479,8 +513,76 @@ func buildDownloadArgs(request DownloadRequest, outputDir, ffmpegPath string) ([
 	default:
 		return nil, ErrInvalidDownload
 	}
+	args = append(args, decision.ytDLPArgs()...)
 	args = append(args, "-o", filepath.Join(outputDir, "output.%(ext)s"), "--", request.SourceURL)
 	return args, nil
+}
+
+func buildParseArgs(sourceURL, ffmpegPath string, decision EgressDecision) []string {
+	args := []string{
+		"--no-playlist", "--skip-download", "--dump-single-json", "--no-warnings",
+		"--ffmpeg-location", ffmpegPath,
+	}
+	args = append(args, decision.ytDLPArgs()...)
+	return append(args, "--", sourceURL)
+}
+
+func buildCollectionArgs(sourceURL string, limit int, decision EgressDecision) []string {
+	args := []string{
+		"--flat-playlist", "--playlist-end", strconv.Itoa(limit), "--dump-single-json", "--no-warnings",
+	}
+	args = append(args, decision.ytDLPArgs()...)
+	return append(args, "--", sourceURL)
+}
+
+func buildTranscriptionDownloadArgs(sourceURL, outputDir, ffmpegPath string, decision EgressDecision) []string {
+	args := []string{
+		"--no-playlist", "--no-warnings", "--max-filesize", "250M",
+		"-f", "bestaudio/best", "-x", "--audio-format", "wav",
+		"--ffmpeg-location", ffmpegPath,
+	}
+	args = append(args, decision.ytDLPArgs()...)
+	return append(args, "-o", filepath.Join(outputDir, "input.%(ext)s"), "--", sourceURL)
+}
+
+func (e *YTDLPEngine) parseWithDecision(ctx context.Context, sourceURL string, decision EgressDecision) (*MediaInfo, string, error) {
+	stdout, stderr, err := retryExtractor(ctx, maxExtractorAttempts, extractorRetryBackoff, func() ([]byte, string, error) {
+		return runCaptured(ctx, e.ytDLPPath, buildParseArgs(sourceURL, e.ffmpegPath, decision))
+	})
+	if err != nil {
+		return nil, stderr, err
+	}
+	media, err := NormalizeMediaInfo(json.RawMessage(stdout), sourceURL)
+	return media, stderr, err
+}
+
+func (e *YTDLPEngine) parseCollectionWithDecision(
+	ctx context.Context,
+	sourceURL string,
+	limit int,
+	decision EgressDecision,
+) (*CollectionInfo, string, error) {
+	stdout, stderr, err := retryExtractor(ctx, maxExtractorAttempts, extractorRetryBackoff, func() ([]byte, string, error) {
+		return runCaptured(ctx, e.ytDLPPath, buildCollectionArgs(sourceURL, limit, decision))
+	})
+	if err != nil {
+		return nil, stderr, err
+	}
+	collection, err := NormalizeCollectionInfo(json.RawMessage(stdout), sourceURL, limit)
+	return collection, stderr, err
+}
+
+func cleanupAttemptFiles(outputDir string) error {
+	entries, err := os.ReadDir(outputDir)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if err := os.RemoveAll(filepath.Join(outputDir, entry.Name())); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func retryExtractor[T any](ctx context.Context, attempts int, backoff time.Duration, run func() (T, string, error)) (T, string, error) {

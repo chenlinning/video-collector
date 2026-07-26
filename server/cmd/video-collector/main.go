@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -26,9 +27,13 @@ func main() {
 	if err := videocollector.EnsureRuntimeFiles(config.ytDLPPath, config.ffmpegPath, config.whisperPath, config.whisperModelPath); err != nil {
 		log.Fatalf("video collector runtime unavailable: %v", err)
 	}
+	egress, err := videocollector.NewEgressRouter(config.egress)
+	if err != nil {
+		log.Fatalf("initialize egress router: %v", err)
+	}
 
-	engine := videocollector.NewYTDLPEngineWithTranscriber(
-		config.ytDLPPath, config.ffmpegPath, config.whisperPath, config.whisperModelPath, nil,
+	engine := videocollector.NewYTDLPEngineWithTranscriberAndEgress(
+		config.ytDLPPath, config.ffmpegPath, config.whisperPath, config.whisperModelPath, nil, egress,
 	)
 	manager, err := videocollector.NewManager(videocollector.ManagerConfig{
 		Root:               config.tempRoot,
@@ -51,6 +56,7 @@ func main() {
 		ParseRateWindow: 15 * time.Minute,
 		TaskRateWindow:  time.Hour,
 		TrustProxy:      config.trustProxy,
+		EgressStatus:    func() string { return string(egress.Status()) },
 		Runtime: webapp.RuntimeStatus{
 			YTDLPVersion:   commandVersion(config.ytDLPPath, "--version"),
 			FFmpegVersion:  commandVersion(config.ffmpegPath, "-version"),
@@ -116,6 +122,7 @@ type appConfig struct {
 	taskRateLimit    int
 	taskTimeout      time.Duration
 	trustProxy       bool
+	egress           videocollector.EgressConfig
 }
 
 func loadConfig() (appConfig, error) {
@@ -139,6 +146,10 @@ func loadConfig() (appConfig, error) {
 	if taskTimeoutSeconds < 60 || taskTimeoutSeconds > 7200 {
 		return appConfig{}, errors.New("VIDEO_COLLECTOR_TASK_TIMEOUT_SECONDS must be between 60 and 7200")
 	}
+	egress, err := loadEgressConfig()
+	if err != nil {
+		return appConfig{}, err
+	}
 	config := appConfig{
 		listenAddress:    envOrDefault("VIDEO_COLLECTOR_LISTEN", "127.0.0.1:8787"),
 		tempRoot:         envOrDefault("VIDEO_COLLECTOR_TEMP_ROOT", "/app/cache/tasks"),
@@ -154,6 +165,56 @@ func loadConfig() (appConfig, error) {
 		taskRateLimit:    taskRateLimit,
 		taskTimeout:      time.Duration(taskTimeoutSeconds) * time.Second,
 		trustProxy:       envBool("VIDEO_COLLECTOR_TRUST_PROXY", false),
+		egress:           egress,
+	}
+	return config, nil
+}
+
+func loadEgressConfig() (videocollector.EgressConfig, error) {
+	mode := videocollector.EgressMode(strings.ToLower(envOrDefault("VIDEO_COLLECTOR_EGRESS_MODE", string(videocollector.EgressModeOff))))
+	if mode != videocollector.EgressModeOff && mode != videocollector.EgressModeAuto {
+		return videocollector.EgressConfig{}, errors.New("VIDEO_COLLECTOR_EGRESS_MODE must be off or auto")
+	}
+	routeTTLSeconds, err := envIntBetween("VIDEO_COLLECTOR_CN_PROXY_ROUTE_TTL_SECONDS", 1800, 60, 3600)
+	if err != nil {
+		return videocollector.EgressConfig{}, err
+	}
+	connectTimeoutSeconds, err := envIntBetween("VIDEO_COLLECTOR_CN_PROXY_CONNECT_TIMEOUT_SECONDS", 5, 1, 15)
+	if err != nil {
+		return videocollector.EgressConfig{}, err
+	}
+	breakerFailures, err := envIntBetween("VIDEO_COLLECTOR_CN_PROXY_BREAKER_FAILURES", 3, 1, 10)
+	if err != nil {
+		return videocollector.EgressConfig{}, err
+	}
+	breakerSeconds, err := envIntBetween("VIDEO_COLLECTOR_CN_PROXY_BREAKER_SECONDS", 60, 10, 600)
+	if err != nil {
+		return videocollector.EgressConfig{}, err
+	}
+	config := videocollector.EgressConfig{
+		Mode:            mode,
+		RouteTTL:        time.Duration(routeTTLSeconds) * time.Second,
+		ConnectTimeout:  time.Duration(connectTimeoutSeconds) * time.Second,
+		BreakerFailures: breakerFailures,
+		BreakerDuration: time.Duration(breakerSeconds) * time.Second,
+	}
+	if mode == videocollector.EgressModeOff {
+		return config, nil
+	}
+	config.ProxyURL = strings.TrimSpace(os.Getenv("VIDEO_COLLECTOR_CN_PROXY_URL"))
+	rawHosts := os.Getenv("VIDEO_COLLECTOR_CN_PROXY_SOURCE_HOSTS")
+	if strings.TrimSpace(rawHosts) == "" {
+		return videocollector.EgressConfig{}, errors.New("VIDEO_COLLECTOR_CN_PROXY_SOURCE_HOSTS is required in auto mode")
+	}
+	for _, value := range strings.Split(rawHosts, ",") {
+		host := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(value), "."))
+		if host == "" {
+			return videocollector.EgressConfig{}, errors.New("VIDEO_COLLECTOR_CN_PROXY_SOURCE_HOSTS contains an empty rule")
+		}
+		config.SourceHosts = append(config.SourceHosts, host)
+	}
+	if _, err := videocollector.NewEgressRouter(config); err != nil {
+		return videocollector.EgressConfig{}, fmt.Errorf("invalid domestic egress configuration: %w", err)
 	}
 	return config, nil
 }
@@ -179,6 +240,18 @@ func envInt(name string, fallback int) int {
 		return -1
 	}
 	return value
+}
+
+func envIntBetween(name string, fallback, minimum, maximum int) (int, error) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback, nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < minimum || value > maximum {
+		return 0, fmt.Errorf("%s must be between %d and %d", name, minimum, maximum)
+	}
+	return value, nil
 }
 
 func envOrDefault(name, fallback string) string {

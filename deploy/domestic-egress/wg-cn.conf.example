@@ -1,0 +1,10 @@
+# Install as /etc/wireguard/wg-video-collector.conf on the domestic egress server.
+# Replace placeholders locally. Never commit private keys.
+[Interface]
+PrivateKey = <CN_PRIVATE_KEY>
+Address = 10.77.0.2/30
+ListenPort = 51820
+
+[Peer]
+PublicKey = <US_PUBLIC_KEY>
+AllowedIPs = 10.77.0.1/32

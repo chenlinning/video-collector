@@ -2,9 +2,18 @@ package videocollector
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -61,24 +70,52 @@ func TestRetryExtractorHonorsCancellationDuringBackoff(t *testing.T) {
 }
 
 func TestBuildDownloadArgsSupportsMediaMP3AndSubtitles(t *testing.T) {
-	media, err := buildDownloadArgs(DownloadRequest{Kind: TaskKindMedia, FormatID: "137", HasAudio: false}, "/tmp/task", "/usr/bin/ffmpeg")
+	direct := EgressDecision{Route: EgressDirect}
+	media, err := buildDownloadArgs(DownloadRequest{Kind: TaskKindMedia, FormatID: "137", HasAudio: false}, "/tmp/task", "/usr/bin/ffmpeg", direct)
 	require.NoError(t, err)
 	require.Contains(t, media, "137+bestaudio/best")
 	require.NotContains(t, media, "--extract-audio")
+	require.NotContains(t, media, "--proxy")
 
-	audio, err := buildDownloadArgs(DownloadRequest{Kind: TaskKindAudio}, "/tmp/task", "/usr/bin/ffmpeg")
+	proxy := EgressDecision{Route: EgressCNProxy, proxyURL: "http://10.77.0.2:3128", connectTimeout: 5 * time.Second}
+	audio, err := buildDownloadArgs(DownloadRequest{Kind: TaskKindAudio}, "/tmp/task", "/usr/bin/ffmpeg", proxy)
 	require.NoError(t, err)
 	require.Contains(t, audio, "--extract-audio")
 	require.Contains(t, audio, "mp3")
+	require.Equal(t, 1, countArgument(audio, "--proxy"))
+	require.Contains(t, audio, "http://10.77.0.2:3128")
 
-	subtitle, err := buildDownloadArgs(DownloadRequest{Kind: TaskKindSubtitle, ResourceID: "zh-Hans", Automatic: true}, "/tmp/task", "/usr/bin/ffmpeg")
+	subtitle, err := buildDownloadArgs(DownloadRequest{Kind: TaskKindSubtitle, ResourceID: "zh-Hans", Automatic: true}, "/tmp/task", "/usr/bin/ffmpeg", proxy)
 	require.NoError(t, err)
 	require.Contains(t, subtitle, "--write-auto-subs")
 	require.Contains(t, subtitle, "zh-Hans")
 	require.Contains(t, subtitle, "srt")
+	require.Equal(t, 1, countArgument(subtitle, "--proxy"))
 
-	_, err = buildDownloadArgs(DownloadRequest{Kind: TaskKindSubtitle, ResourceID: "../../etc/passwd"}, "/tmp/task", "/usr/bin/ffmpeg")
+	_, err = buildDownloadArgs(DownloadRequest{Kind: TaskKindSubtitle, ResourceID: "../../etc/passwd"}, "/tmp/task", "/usr/bin/ffmpeg", direct)
 	require.ErrorIs(t, err, ErrInvalidDownload)
+}
+
+func TestBuildParseAndTranscriptionArgsUseOnlyTrustedRouteProxy(t *testing.T) {
+	direct := EgressDecision{Route: EgressDirect}
+	proxy := EgressDecision{Route: EgressCNProxy, proxyURL: "http://10.77.0.2:3128", connectTimeout: 5 * time.Second}
+
+	require.NotContains(t, buildParseArgs("https://example.com/video", "/usr/bin/ffmpeg", direct), "--proxy")
+	require.Equal(t, 1, countArgument(buildParseArgs("https://example.com/video", "/usr/bin/ffmpeg", proxy), "--proxy"))
+	require.NotContains(t, buildCollectionArgs("https://example.com/list", 10, direct), "--proxy")
+	require.Equal(t, 1, countArgument(buildCollectionArgs("https://example.com/list", 10, proxy), "--proxy"))
+	require.NotContains(t, buildTranscriptionDownloadArgs("https://example.com/video", "/tmp/task", "/usr/bin/ffmpeg", direct), "--proxy")
+	require.Equal(t, 1, countArgument(buildTranscriptionDownloadArgs("https://example.com/video", "/tmp/task", "/usr/bin/ffmpeg", proxy), "--proxy"))
+}
+
+func countArgument(args []string, expected string) int {
+	count := 0
+	for _, arg := range args {
+		if arg == expected {
+			count++
+		}
+	}
+	return count
 }
 
 func TestSelectMediaImageAndSafeExtension(t *testing.T) {
@@ -125,4 +162,132 @@ func TestParseProbeDurationRejectsMediaLongerThanOneHour(t *testing.T) {
 
 	_, err = parseProbeDuration("not-a-duration")
 	require.Error(t, err)
+}
+
+func TestSafeHTTPClientUsesTrustedProxyAndRejectsPrivateRedirect(t *testing.T) {
+	var requests atomic.Int32
+	proxy := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		requests.Add(1)
+		if request.URL.Path == "/redirect" {
+			http.Redirect(response, request, "http://private.example/final", http.StatusFound)
+			return
+		}
+		response.Header().Set("Content-Type", "image/png")
+		_, _ = response.Write([]byte("image"))
+	}))
+	t.Cleanup(proxy.Close)
+
+	resolver := hostResolverStub{addresses: map[string][]net.IPAddr{
+		"media.example":   {{IP: net.ParseIP("203.0.113.10")}},
+		"private.example": {{IP: net.ParseIP("10.0.0.8")}},
+	}}
+	decision := EgressDecision{Route: EgressCNProxy, proxyURL: proxy.URL, connectTimeout: time.Second}
+	client, err := newSafeHTTPClient(resolver, decision)
+	require.NoError(t, err)
+
+	response, err := client.Get("http://media.example/image.png")
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, response.StatusCode)
+	require.NoError(t, response.Body.Close())
+	require.Equal(t, int32(1), requests.Load())
+
+	_, err = client.Get("http://media.example/redirect")
+	require.ErrorIs(t, err, ErrUnsafeMediaURL)
+	require.Equal(t, int32(2), requests.Load())
+}
+
+func TestSafeHTTPClientUsesHTTPConnectForHTTPS(t *testing.T) {
+	target := httptest.NewTLSServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		response.Header().Set("Content-Type", "image/png")
+		_, _ = response.Write([]byte("secure-image"))
+	}))
+	t.Cleanup(target.Close)
+
+	var connectRequests atomic.Int32
+	proxy := newConnectProxy(t, target.Listener.Addr().String(), &connectRequests)
+	t.Cleanup(proxy.Close)
+	client, err := newSafeHTTPClient(
+		hostResolverStub{addresses: map[string][]net.IPAddr{"example.com": {{IP: net.ParseIP("93.184.216.34")}}}},
+		EgressDecision{Route: EgressCNProxy, proxyURL: proxy.URL, connectTimeout: time.Second},
+	)
+	require.NoError(t, err)
+	rootCAs := x509.NewCertPool()
+	rootCAs.AddCert(target.Certificate())
+	client.Transport.(*http.Transport).TLSClientConfig = &tls.Config{RootCAs: rootCAs, MinVersion: tls.VersionTLS12}
+
+	response, err := client.Get("https://example.com/image.png")
+	require.NoError(t, err)
+	defer response.Body.Close()
+	content, err := io.ReadAll(response.Body)
+	require.NoError(t, err)
+	require.Equal(t, "secure-image", string(content))
+	require.Equal(t, int32(1), connectRequests.Load())
+}
+
+func TestSafeHTTPClientDirectRouteRejectsPrivateDNS(t *testing.T) {
+	resolver := hostResolverStub{addresses: map[string][]net.IPAddr{
+		"private.example": {{IP: net.ParseIP("10.0.0.8")}},
+	}}
+	client, err := newSafeHTTPClient(resolver, EgressDecision{Route: EgressDirect})
+	require.NoError(t, err)
+	_, err = client.Get("http://private.example/image.png")
+	require.ErrorIs(t, err, ErrUnsafeMediaURL)
+}
+
+func TestCleanupAttemptFilesRemovesOnlyTaskContents(t *testing.T) {
+	parent := t.TempDir()
+	taskDirectory := filepath.Join(parent, "task")
+	require.NoError(t, os.Mkdir(taskDirectory, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(taskDirectory, "output.mp4.part"), []byte("partial"), 0o600))
+	require.NoError(t, os.Mkdir(filepath.Join(taskDirectory, "fragments"), 0o700))
+	outside := filepath.Join(parent, "outside.txt")
+	require.NoError(t, os.WriteFile(outside, []byte("keep"), 0o600))
+
+	require.NoError(t, cleanupAttemptFiles(taskDirectory))
+	entries, err := os.ReadDir(taskDirectory)
+	require.NoError(t, err)
+	require.Empty(t, entries)
+	content, err := os.ReadFile(outside)
+	require.NoError(t, err)
+	require.Equal(t, "keep", strings.TrimSpace(string(content)))
+}
+
+type hostResolverStub struct {
+	addresses map[string][]net.IPAddr
+}
+
+func newConnectProxy(t *testing.T, targetAddress string, requests *atomic.Int32) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodConnect {
+			http.Error(response, "CONNECT required", http.StatusMethodNotAllowed)
+			return
+		}
+		requests.Add(1)
+		target, err := net.DialTimeout("tcp", targetAddress, time.Second)
+		if err != nil {
+			http.Error(response, "target unavailable", http.StatusBadGateway)
+			return
+		}
+		client, _, err := response.(http.Hijacker).Hijack()
+		if err != nil {
+			_ = target.Close()
+			return
+		}
+		_, _ = fmt.Fprint(client, "HTTP/1.1 200 Connection Established\r\n\r\n")
+		go func() {
+			defer target.Close()
+			_, _ = io.Copy(target, client)
+		}()
+		_, _ = io.Copy(client, target)
+		_ = client.Close()
+	}))
+}
+
+func (r hostResolverStub) LookupIPAddr(_ context.Context, host string) ([]net.IPAddr, error) {
+	addresses := r.addresses[strings.ToLower(strings.TrimSuffix(host, "."))]
+	if len(addresses) == 0 {
+		return nil, errors.New("host not found")
+	}
+	return addresses, nil
 }

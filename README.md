@@ -25,6 +25,7 @@ Video Collector 是一个无需登录的公开多媒体解析与临时下载网�
 - 嵌入页面不显示独立顶部导航，临时文件规则在主内容区显著展示。
 - 允许通过 iframe 嵌入其它 HTTP/HTTPS 网站，不限制父页面域名。
 - IP 限流、全局并发、有界队列、SSRF 防护和严格 JSON 校验。
+- 可选国内临时出口：默认关闭；仅对受控主机和可确认的地域/IP/网络错误自动回退，国内服务器不运行项目或保存媒体。
 
 不支持 DRM、付费、登录或权限受限媒体，也不保证所有平台永久可用。
 
@@ -39,7 +40,7 @@ pnpm typecheck
 pnpm build:web
 
 $env:GOCACHE = "$PWD\cache\go-build"
-$env:GOMODCACHE = "D:\Program Files\VideoCollector-go-mod"
+$env:GOMODCACHE = "$PWD\cache\go-mod"
 & "D:\Program Files\Go-1.26.5\bin\go.exe" test ./server/...
 ```
 
@@ -93,6 +94,7 @@ pnpm test:acceptance
 server/                 Go HTTP 服务、解析引擎和任务管理
 src/renderer/           React 网站
 deploy/nginx/           正式域名 Nginx 配置
+deploy/domestic-egress/ 国内临时出口的无密钥 WireGuard/Squid 模板
 cache/                  本项目全部构建及运行缓存
 dist-web/               Web 生产构建
 Dockerfile              前端、后端和媒体工具多阶段镜像
@@ -120,6 +122,8 @@ docker-compose.yml      单服务生产编排
 ## 文档
 
 - [生产部署指南](./DEPLOYMENT.md)
+- [国内临时出口实施与验收任务书](./TASK-DOMESTIC-EGRESS-PROXY.md)
+- [国内临时出口服务器模板](./deploy/domestic-egress/README.md)
 - [多媒体工作台功能与验收任务书](./TASK_MEDIA_WORKBENCH_PARITY.md)
 - [匿名 Web 服务任务书](./TASK-INDEPENDENT-WEB-SERVICE.md)
 - [Web 主题与构建验收](./TASK-WEB-DEPLOYMENT.md)

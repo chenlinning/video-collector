@@ -1,0 +1,11 @@
+# Install as /etc/wireguard/wg-video-collector.conf on 47.251.87.147.
+# Replace placeholders locally. Never commit private keys.
+[Interface]
+PrivateKey = <US_PRIVATE_KEY>
+Address = 10.77.0.1/30
+
+[Peer]
+PublicKey = <CN_PUBLIC_KEY>
+Endpoint = <CN_PUBLIC_IPV4>:51820
+AllowedIPs = 10.77.0.2/32
+PersistentKeepalive = 25

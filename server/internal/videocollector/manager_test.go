@@ -21,6 +21,10 @@ type blockingEngine struct {
 	release chan struct{}
 }
 
+type partialBlockingEngine struct {
+	started chan struct{}
+}
+
 type transcriptEngineStub struct{}
 
 func (transcriptEngineStub) Parse(context.Context, string) (*MediaInfo, error) {
@@ -53,6 +57,19 @@ func (engine blockingEngine) Download(ctx context.Context, _ DownloadRequest, ou
 		}
 		return &DownloadResult{Path: path, Extension: "mp4"}, nil
 	}
+}
+
+func (engine partialBlockingEngine) Parse(context.Context, string) (*MediaInfo, error) {
+	return &MediaInfo{ID: "media-1"}, nil
+}
+
+func (engine partialBlockingEngine) Download(ctx context.Context, _ DownloadRequest, outputDir string, _ func(ProgressUpdate)) (*DownloadResult, error) {
+	if err := os.WriteFile(filepath.Join(outputDir, "output.mp4.part"), []byte("partial"), 0o600); err != nil {
+		return nil, err
+	}
+	close(engine.started)
+	<-ctx.Done()
+	return nil, ctx.Err()
 }
 
 func (engineStub) Download(_ context.Context, _ DownloadRequest, outputDir string, progress func(ProgressUpdate)) (*DownloadResult, error) {
@@ -198,6 +215,35 @@ func TestManagerTimesOutLongRunningTasks(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("task did not time out")
+}
+
+func TestManagerCancellationRemovesPartialFiles(t *testing.T) {
+	root := t.TempDir()
+	started := make(chan struct{})
+	manager, err := NewManager(ManagerConfig{
+		Root: root, MaxConcurrent: 1, MaxQueued: 1,
+	}, partialBlockingEngine{started: started})
+	require.NoError(t, err)
+	defer manager.Close()
+
+	task, err := manager.Start(DownloadRequest{SourceURL: "https://example.com/video", FormatID: "best"})
+	require.NoError(t, err)
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("download did not start")
+	}
+	require.FileExists(t, filepath.Join(root, task.ID, "output.mp4.part"))
+	require.NoError(t, manager.Cancel(task.ID))
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if _, statErr := os.Stat(filepath.Join(root, task.ID)); os.IsNotExist(statErr) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("cancelled task directory was not removed")
 }
 
 func TestManagerAcceptsAllowedTranscriptionUploadAndRejectsUnsafeExtension(t *testing.T) {
