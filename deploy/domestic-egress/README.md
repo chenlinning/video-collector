@@ -1,19 +1,30 @@
 # Domestic temporary egress
 
-This directory contains secret-free templates for the optional domestic egress. The production application remains on `47.251.87.147`; the domestic server runs only WireGuard and a private, non-caching Squid listener.
+This directory contains secret-free templates for the optional domestic egress. The production application remains on `47.251.87.147`. For Video Collector, the shared domestic host only adds WireGuard and a private, non-caching Squid listener; its existing and future unrelated workloads remain untouched.
 
 ## Required input
 
-Do not begin server changes until the domestic server IPv4, Linux distribution, SSH method, bandwidth allowance, UDP availability and cloud security-group rules are confirmed.
+Do not begin server changes until the domestic server IPv4, Linux distribution, SSH method, bandwidth allowance, UDP availability, cloud security-group rules, existing workloads, listeners, Docker networks, global proxy settings and resource baseline are confirmed.
+
+## Shared-host isolation
+
+- Snapshot addresses, routes, policy rules, listeners, firewall rules, systemd services, Docker networks and resource use before installation.
+- Use the dedicated `wg-vc-egress` interface and `squid-video-collector.service` only. Keep Linux interface names within the 15-character limit.
+- Install the proxy configuration as `/etc/squid/video-collector.conf`; never overwrite the default Squid configuration or restart an existing `squid.service`.
+- Do not change the default route, DNS, global proxy environment, Docker daemon, Nginx or another project's files and services.
+- Do not restart Docker, Nginx, SSH, an existing VPN/proxy or an unrelated project service.
+- Apply CPU, memory, task and file-descriptor limits after measuring available resources.
+- After every change, recheck existing project health, routes, listeners and resource use. Stop and roll back on any regression.
 
 ## Network installation order
 
 1. Install WireGuard from each server's stable operating-system repository.
 2. Generate each private key on the server that owns it. Keep files mode `0600` and never copy private keys into this repository.
-3. Install the matching `wg-*.conf.example` as `/etc/wireguard/wg-video-collector.conf`, replace placeholders and start `wg-quick@wg-video-collector`.
+3. Install the matching `wg-*.conf.example` as `/etc/wireguard/wg-vc-egress.conf`, replace placeholders and start `wg-quick@wg-vc-egress`.
 4. On the domestic cloud security group, allow UDP `51820` only from `47.251.87.147`. Do not add a public TCP `3128` rule.
-5. Install the distribution's maintained Squid 6/7 package on the domestic server. Check which configuration directives that exact version supports before replacing its configuration.
-6. Install `squid.conf.example`, run `squid -k parse`, then restart Squid. Confirm it listens only on `10.77.0.2:3128`.
+5. Install the distribution's maintained Squid package (currently 5.9 on the domestic Ubuntu 22.04 host) without automatically starting its default service. Stop if Squid already exists or TCP `3128` conflicts until the existing owner is identified.
+6. Install `squid.conf.example` as `/etc/squid/video-collector.conf` and the dedicated service template as `/etc/systemd/system/squid-video-collector.service`.
+7. Run `squid -k parse -f /etc/squid/video-collector.conf`, start only `squid-video-collector.service`, and confirm it listens only on `10.77.0.2:3128`.
 
 ## Required checks
 

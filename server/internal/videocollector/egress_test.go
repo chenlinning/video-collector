@@ -188,6 +188,28 @@ func TestExecuteWithEgressSwitchesAtMostOnce(t *testing.T) {
 	require.Equal(t, []EgressRoute{EgressDirect, EgressCNProxy}, routes)
 }
 
+func TestExecuteWithEgressPreservesTargetFailureAfterBothRoutesFail(t *testing.T) {
+	router, err := NewEgressRouter(EgressConfig{
+		Mode: EgressModeAuto, ProxyURL: "http://10.77.0.2:3128", SourceHosts: []string{"bilibili.com"},
+		RouteTTL: time.Minute, ConnectTimeout: time.Second, BreakerFailures: 3, BreakerDuration: time.Minute,
+	})
+	require.NoError(t, err)
+
+	var routes []EgressRoute
+	_, stderr, err := executeWithEgress(context.Background(), router, "www.bilibili.com", nil, func(decision EgressDecision) (string, string, error) {
+		routes = append(routes, decision.Route)
+		if decision.Route == EgressDirect {
+			return "", "ERROR: direct request returned HTTP Error 412", errors.New("exit status 1")
+		}
+		return "", "ERROR: alternate request returned HTTP Error 412", errors.New("exit status 1")
+	})
+
+	require.Error(t, err)
+	require.Equal(t, []EgressRoute{EgressDirect, EgressCNProxy}, routes)
+	require.Contains(t, stderr, "alternate request returned HTTP Error 412")
+	require.NotContains(t, stderr, "direct and alternate egress failed")
+}
+
 func TestExecuteWithEgressFallsBackForTimeout(t *testing.T) {
 	router, err := NewEgressRouter(EgressConfig{
 		Mode: EgressModeAuto, ProxyURL: "http://10.77.0.2:3128", SourceHosts: []string{"bilibili.com"},

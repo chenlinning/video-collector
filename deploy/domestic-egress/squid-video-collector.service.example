@@ -1,0 +1,26 @@
+[Unit]
+Description=Video Collector private domestic egress proxy
+Wants=network-online.target
+After=network-online.target wg-quick@wg-vc-egress.service
+BindsTo=wg-quick@wg-vc-egress.service
+
+[Service]
+Type=simple
+ExecStartPre=/usr/sbin/squid -k parse -f /etc/squid/video-collector.conf
+ExecStart=/usr/sbin/squid -N -f /etc/squid/video-collector.conf
+ExecReload=/usr/sbin/squid -k reconfigure -f /etc/squid/video-collector.conf
+ExecStop=/usr/sbin/squid -k shutdown -f /etc/squid/video-collector.conf
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=15s
+PrivateTmp=true
+ProtectHome=true
+CPUQuota=25%
+MemoryMax=192M
+TasksMax=64
+LimitNOFILE=4096
+Nice=10
+OOMScoreAdjust=500
+
+[Install]
+WantedBy=multi-user.target

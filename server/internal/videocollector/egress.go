@@ -308,18 +308,10 @@ func executeWithEgress[T any](
 			router.Report(host, decision, failure)
 		}
 		if switched || router == nil {
-			if switched || decision.Route == EgressCNProxy {
-				var zero T
-				return zero, "direct and alternate egress failed", errors.New("direct and alternate egress failed")
-			}
 			return value, stderr, err
 		}
 		next, ok := router.Fallback(host, decision, failure)
 		if !ok {
-			if decision.Route == EgressCNProxy {
-				var zero T
-				return zero, "alternate egress failed", errors.New("alternate egress failed")
-			}
 			return value, stderr, err
 		}
 		if cleanup != nil {

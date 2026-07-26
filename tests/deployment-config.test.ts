@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 const nginx = readFileSync(new URL("../deploy/nginx/video-collector.ximoai.cn.conf", import.meta.url), "utf8");
 const compose = readFileSync(new URL("../docker-compose.yml", import.meta.url), "utf8");
 const environment = readFileSync(new URL("../.env.example", import.meta.url), "utf8");
+const deployment = readFileSync(new URL("../DEPLOYMENT.md", import.meta.url), "utf8");
 
 describe("production upload proxy", () => {
   it("accepts the bounded transcription upload without buffering it outside project cache", () => {
@@ -28,5 +29,11 @@ describe("domestic egress deployment", () => {
     }
     expect(compose).not.toMatch(/^\s+HTTPS?_PROXY:/m);
     expect(compose).toContain("- ./cache:/app/cache");
+  });
+
+  it("documents the verified AcFun host in the production auto-route example", () => {
+    expect(deployment).toContain(
+      "VIDEO_COLLECTOR_CN_PROXY_SOURCE_HOSTS=bilibili.com,b23.tv,acfun.cn"
+    );
   });
 });

@@ -1,10 +1,10 @@
 # Video Collector 国内临时出口代理实施与验收任务书
 
-> 文档状态：本地实现、自动化测试、镜像发布和生产默认关闭上线完成；国内网络 PoC 与生产启用待完成
+> 文档状态：本地实现、自动化测试、镜像发布和国内网络 PoC 已完成；生产应用启用与故障回滚演练待完成
 > 创建日期：2026-07-26
 > 当前生产服务器：`47.251.87.147`
 > 当前正式地址：`https://video-collector.ximoai.cn`
-> 国内服务器角色：仅作为无缓存、受控的临时网络出口，不运行本项目
+> 国内服务器角色：相对于 Video Collector 仅增加无缓存、受控的临时网络出口；不运行本项目，且不得影响该服务器已有或后续部署的其他项目
 
 ## 1. 目标
 
@@ -24,6 +24,7 @@
 - 唯一生产应用服务器仍为 `47.251.87.147`。
 - 唯一正式网址仍为 `https://video-collector.ximoai.cn`。
 - 国内服务器不是第二套生产环境，不对外提供 Video Collector 网站或 API。
+- 国内服务器是共享宿主机；已有和后续其他项目、容器、端口、默认路由及代理设置均不属于本任务的修改范围。
 - 国内服务器不得成为公网开放代理。
 - 主站 `D:\sub2api中转站` 继续只读，不在本任务中修改。
 - 项目产生的缓存继续只允许写入项目根 `cache` 映射的 `/app/cache`。
@@ -53,6 +54,8 @@
 - [ ] 可用公网带宽、月流量和计费方式。
 - [ ] UDP 是否可用；如可用，允许的 WireGuard UDP 端口。
 - [ ] 国内服务器是否已有防火墙、代理、VPN 或端口占用。
+- [ ] 国内服务器已有 systemd 服务、Docker 容器与网络、监听端口、CPU、内存、磁盘和负载基线。
+- [ ] 国内服务器现有项目的健康检查、配置备份和不中断验收方式。
 - [ ] 需要优先验证的两个公开国内平台链接。
 - [ ] 云服务商和目标平台规则允许该服务器作为私有服务器间出口。
 
@@ -68,7 +71,7 @@
 - `/health` 只增加高层 `egressStatus`，不会返回代理地址、密钥或域名清单。
 - `.env.example`、Compose、生产部署文档和无密钥 WireGuard/Squid 模板已经同步。
 
-本地 Go、前端、Linux race、完整生产镜像和 AcFun 直连下载回归已通过。提交 `7c8f1cd` 已发布并以 `VIDEO_COLLECTOR_EGRESS_MODE=off` 部署到正式站点，`/health` 返回 `egressStatus=off`；国内服务器信息、WireGuard/Squid 真实 PoC 和两个国内平台验收尚未提供或执行。
+本地 Go、前端、Linux race、完整生产镜像和 AcFun 直连下载回归已通过。提交 `7c8f1cd` 已发布并以 `VIDEO_COLLECTOR_EGRESS_MODE=off` 部署到正式站点，`/health` 返回 `egressStatus=off`。国内服务器为 Ubuntu 22.04、IP `47.99.92.130`；WireGuard `wg-vc-egress` 与专用 Squid 已完成真实 PoC，既有 `ximoai-novel-inkos-1` 容器、默认路由、Docker 网络和监听状态保持不变。AcFun 经国内出口解析成功；Bilibili 直连和国内出口均 HTTP 412，西瓜要求 Cookie，好看视频为 `Unsupported URL`。
 
 ## 6. 目标架构
 
@@ -107,7 +110,7 @@ flowchart LR
 ### 7.1 推荐组件
 
 - 隧道：WireGuard。
-- 代理：支持 HTTP CONNECT、来源 ACL、目标 ACL 和禁用缓存的受维护代理服务；首选操作系统稳定仓库中的 Squid 6/7。
+- 代理：支持 HTTP CONNECT、来源 ACL、目标 ACL 和禁用缓存的受维护代理服务；首选操作系统稳定仓库中的 Squid（当前国内 Ubuntu 22.04 为 5.9），上线前必须按实际构建验证语法。
 - WireGuard 和代理都由 systemd 管理。
 
 使用 HTTP CONNECT 的原因：
@@ -138,7 +141,19 @@ WireGuard：    国内服务器公网 IPv4:51820/UDP
 - 项目容器通过宿主机路由访问 `10.77.0.2:3128`，不得给项目容器增加 `NET_ADMIN` 或特权模式。
 - 如果一端在 NAT 后且需要保持映射，才配置 `PersistentKeepalive = 25`。
 
-### 7.4 国内代理要求
+### 7.4 共享宿主机隔离要求
+
+国内服务器作为共享宿主机时还必须满足：
+
+1. 安装前保存地址、路由、策略路由、监听端口、防火墙、systemd 服务、Docker 网络和资源基线。
+2. 使用独立的 `wg-vc-egress` 接口、配置、密钥和 systemd 单元，不复用其他 VPN 接口；接口名不得超过 Linux 的 15 字符上限。
+3. 使用独立的 `/etc/squid/video-collector.conf` 和 `squid-video-collector.service`，不得覆盖默认 Squid 配置或重启已有 `squid.service`。
+4. 不修改默认路由、DNS、全局 `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`、Docker daemon、Nginx 或其他项目环境变量。
+5. 不重启 Docker、Nginx、SSH、现有 VPN/代理或其他项目服务；新增防火墙规则必须是窄范围追加，不能清空或替换现有规则集。
+6. 为专用代理单元设置 CPU、内存、任务数和文件描述符上限；上限必须根据安装前资源审计确定。
+7. 每个变更步骤后复查已有项目健康、监听端口、默认路由和资源使用；任一回归立即停止并回滚本步骤。
+
+### 7.5 国内代理 ACL 与缓存要求
 
 代理必须满足以下顺序化 ACL：
 
@@ -271,7 +286,7 @@ const (
 ```dotenv
 VIDEO_COLLECTOR_EGRESS_MODE=auto
 VIDEO_COLLECTOR_CN_PROXY_URL=http://10.77.0.2:3128
-VIDEO_COLLECTOR_CN_PROXY_SOURCE_HOSTS=bilibili.com,b23.tv
+VIDEO_COLLECTOR_CN_PROXY_SOURCE_HOSTS=bilibili.com,b23.tv,acfun.cn
 VIDEO_COLLECTOR_CN_PROXY_ROUTE_TTL_SECONDS=1800
 VIDEO_COLLECTOR_CN_PROXY_CONNECT_TIMEOUT_SECONDS=5
 VIDEO_COLLECTOR_CN_PROXY_BREAKER_FAILURES=3
@@ -424,19 +439,21 @@ VIDEO_COLLECTOR_CN_PROXY_BREAKER_SECONDS=60
 - [ ] 确认国内服务器带宽成本和平台规则。
 - [ ] 选择两个无需登录的真实国内平台测试链接。
 - [ ] 为国内服务器创建独立回滚和配置备份目录。
+- [ ] 记录国内服务器已有项目、服务、容器、端口、网络和资源基线，并定义逐步健康检查。
 
 通过条件：没有未知的服务器地址、系统、防火墙、端口或授权信息。
 
 ### 阶段 P1：纯网络 PoC，不修改项目
 
-- [ ] 在两台服务器安装并配置 WireGuard。
-- [ ] 验证双方只能通过 WireGuard 地址通信。
-- [ ] 在国内服务器部署无缓存 HTTP CONNECT 代理。
-- [ ] 验证公网无法连接代理端口。
-- [ ] 验证美国服务器可通过 `10.77.0.2:3128` 建立 HTTPS CONNECT。
-- [ ] 从项目容器内执行 yt-dlp 代理解析测试。
-- [ ] 对一个美国直连失败的真实样本完成代理解析和小格式完整下载。
-- [ ] 验证国内服务器未生成媒体缓存文件。
+- [x] 在两台服务器安装并配置 WireGuard。
+- [x] 验证双方只能通过 WireGuard 地址通信。
+- [x] 在国内服务器部署无缓存 HTTP CONNECT 代理。
+- [x] 验证公网无法连接代理端口。
+- [x] 验证美国服务器可通过 `10.77.0.2:3128` 建立 HTTPS CONNECT。
+- [x] 从项目容器内执行 yt-dlp 代理解析测试。
+- [x] 对一个美国直连失败的真实样本完成代理解析和小格式完整下载。
+- [x] 验证国内服务器未生成媒体缓存文件。
+- [x] 验证国内服务器已有项目、默认路由、Docker 网络、监听端口和全局代理设置均未改变。
 
 停止条件：如果国内云服务器 IP 对目标平台仍返回相同风控，停止代码实施并报告该出口不可用，不通过增加 Cookie、账号或代理池规避。
 
@@ -540,7 +557,7 @@ VIDEO_COLLECTOR_CN_PROXY_BREAKER_SECONDS=60
 
 - [ ] 国内服务器 WireGuard 配置及脱敏备份说明。
 - [ ] 美国服务器 WireGuard 配置及脱敏备份说明。
-- [ ] 国内无缓存代理配置和 ACL 验收记录。
+- [x] 国内无缓存代理配置和 ACL 验收记录。
 - [x] 新增路由、错误分类、熔断和代理客户端代码。
 - [x] 单元、集成、竞态和完整构建测试。
 - [x] `.env.example`、Compose 和部署文档更新。
@@ -579,10 +596,10 @@ VIDEO_COLLECTOR_CN_PROXY_BREAKER_SECONDS=60
 - 代理：HTTP 普通转发、TLS CONNECT、应用侧私网 DNS/重定向拒绝、受控 412/超时回退、404/未受控主机不回退、TTL、熔断、半开和并发压力测试通过。
 - 镜像：`video-collector:domestic-egress-test` 完整构建成功；默认 `off` 和合法 `auto` 两种容器均启动，`auto` 容器达到 `healthy`，非法公网代理配置被拒绝。
 - 健康信息：默认返回 `egressStatus=off`，合法 `auto` 返回 `available`，响应未包含代理地址、域名规则或密钥。
-- 真实直连回归：AcFun `https://www.acfun.cn/v/ac48722683` 解析和 MP4 下载通过，文件 5,936,297 字节，`X-Delete-At` 剩余约 14.9 分钟。
+- 真实直连回归：AcFun `https://www.acfun.cn/v/ac48722683` 解析和 MP4 下载通过，文件 5,936,297 字节，`X-Delete-At` 剩余约 14.9 分钟；国内出口回归样本 `https://m.acfun.cn/v/?ac=15974291` 解析返回 `AcFunVideo|15974291|AcFun TV 客户端`。
 - GitHub：提交 `7c8f1cd` 已推送；Actions 运行 `30196946022` 的前端、Go、Linux race 和 GHCR 发布全部成功。
 - 生产部署：服务器运行 `ghcr.io/chenlinning/video-collector:sha-7c8f1cd`，容器 `healthy`，旧镜像回滚标签为 `rollback-pre-egress-20260726-174728`，`.env` 备份为 `.env.bak.pre-egress-20260726-175011`。
 - 公网检查：DNS 仅解析到 `47.251.87.147`，HTTPS 返回 200，`/health` 返回 `status=ok`、`egressStatus=off`；CSP 保持 `frame-ancestors *` 且无 `X-Frame-Options`。
 - 生产页面：AcFun 解析返回 3 个格式，720p 任务完成；点击下载后页面显示首次下载已触发和约 15 分钟删除时间。当前内置浏览器插件没有上报通用 `download` 事件，因此本次会话不把浏览器文件落盘标记为新的通过证据；此前版本的原生下载通过记录仍保留在 `DEPLOYMENT.md`。
 
-尚未完成且不得跳过：第 4 节国内服务器信息、P1 网络 PoC、Squid 真实语法/ACL/公网隔离验收、两个国内平台真实验收及故障/回滚演练。
+尚未完成且不得跳过：第 4 节带宽/计费与平台规则确认、P5 生产应用启用、Bilibili 或第二个受限平台的公开样本验收，以及 P6 故障/回滚演练。

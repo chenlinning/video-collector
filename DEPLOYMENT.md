@@ -152,7 +152,7 @@ VIDEO_COLLECTOR_CN_PROXY_BREAKER_SECONDS=60
 
 ### 5.1 国内临时出口（可选）
 
-国内服务器只作为临时网络出口，不是第二套生产环境。浏览器、Nginx、Go API、任务队列、yt-dlp、FFmpeg、Whisper 和全部媒体临时文件仍只在 `47.251.87.147`。国内服务器不得克隆本仓库、运行项目容器、挂载项目缓存或保存媒体文件。
+相对于 Video Collector，国内服务器只增加临时网络出口，不是第二套生产环境；该服务器可以继续运行已有或后续其他项目。浏览器、Nginx、Go API、任务队列、yt-dlp、FFmpeg、Whisper 和全部媒体临时文件仍只在 `47.251.87.147`。国内服务器不得克隆本仓库、运行本项目容器、挂载本项目缓存或保存本项目媒体文件。
 
 架构：
 
@@ -170,6 +170,8 @@ VIDEO_COLLECTOR_CN_PROXY_BREAKER_SECONDS=60
 - 公网带宽、月流量、计费规则及云服务商是否允许作为私有服务器间出口。
 - 两个无需登录、Cookie 或 DRM 的公开国内平台验收链接。
 - 示例网段 `10.77.0.0/30` 不与两台服务器现有网络重叠。
+- 国内服务器已有项目、systemd 服务、Docker 容器与网络、监听端口、默认路由、全局代理设置和资源使用基线。
+- 已有项目的健康检查和逐步回滚方式；任何步骤造成回归时立即停止。
 
 无上述信息时只能保持 `VIDEO_COLLECTOR_EGRESS_MODE=off`，不得猜测地址或修改国内服务器。
 
@@ -181,10 +183,11 @@ VIDEO_COLLECTOR_CN_PROXY_BREAKER_SECONDS=60
 deploy/domestic-egress/wg-us.conf.example
 deploy/domestic-egress/wg-cn.conf.example
 deploy/domestic-egress/squid.conf.example
+deploy/domestic-egress/squid-video-collector.service.example
 deploy/domestic-egress/README.md
 ```
 
-在两台服务器使用操作系统稳定仓库安装 WireGuard；国内服务器另外安装其发行版维护的 Squid 6/7。私钥必须在各自服务器本地生成并以 `0600` 保存，不能写入 Git、聊天记录、Docker 环境或命令行参数。
+在两台服务器使用操作系统稳定仓库安装 WireGuard；国内服务器另外安装其发行版维护的 Squid（当前 Ubuntu 22.04 软件源为 5.9）。国内端使用独立的 `/etc/squid/video-collector.conf` 和 `squid-video-collector.service`，不得覆盖默认 Squid 配置或重启已有 `squid.service`。私钥必须在各自服务器本地生成并以 `0600` 保存，不能写入 Git、聊天记录、Docker 环境或命令行参数。
 
 安全组和监听要求：
 
@@ -195,22 +198,27 @@ deploy/domestic-egress/README.md
 5. 项目容器不增加 `NET_ADMIN`、host 网络或特权模式。
 6. Squid 拒绝 80/443 以外端口、所有私网/链路本地/元数据/保留目标，并以 `deny all` 结束。
 7. Squid 禁用缓存、关闭包含 URL 的访问日志，不启用 SSL Bump。
+8. 不改变国内服务器默认路由、DNS、全局代理、Docker daemon、Nginx、现有防火墙规则或其他项目环境变量。
+9. 不重启 Docker、Nginx、SSH、现有 VPN/代理或其他项目服务；专用代理单元必须设置资源上限。
 
 安装配置后必须先执行版本对应的语法检查：
 
 ```bash
-sudo squid -k parse
-sudo systemctl restart squid
-sudo systemctl enable squid
+sudo squid -k parse -f /etc/squid/video-collector.conf
+sudo systemctl daemon-reload
+sudo systemctl restart squid-video-collector
+sudo systemctl enable squid-video-collector
 sudo ss -lntp | grep 10.77.0.2:3128
 ```
+
+每个安装或启动步骤后都必须复查原有项目健康、默认路由、监听端口、Docker 网络和资源使用。默认 `squid.service` 已存在、端口冲突或资源余量不足时停止，不覆盖、不抢占。
 
 #### 5.1.2 纯网络 PoC
 
 从 `47.251.87.147` 验证隧道和代理：
 
 ```bash
-sudo wg show wg-video-collector
+sudo wg show wg-vc-egress
 ping -c 3 10.77.0.2
 curl --fail --show-error --proxy http://10.77.0.2:3128 https://example.com/ -o /dev/null
 curl --fail --show-error --proxy http://10.77.0.2:3128 http://169.254.169.254/
@@ -232,7 +240,7 @@ curl --fail --show-error --proxy http://10.77.0.2:3128 http://169.254.169.254/
 ```dotenv
 VIDEO_COLLECTOR_EGRESS_MODE=auto
 VIDEO_COLLECTOR_CN_PROXY_URL=http://10.77.0.2:3128
-VIDEO_COLLECTOR_CN_PROXY_SOURCE_HOSTS=bilibili.com,b23.tv
+VIDEO_COLLECTOR_CN_PROXY_SOURCE_HOSTS=bilibili.com,b23.tv,acfun.cn
 VIDEO_COLLECTOR_CN_PROXY_ROUTE_TTL_SECONDS=1800
 VIDEO_COLLECTOR_CN_PROXY_CONNECT_TIMEOUT_SECONDS=5
 VIDEO_COLLECTOR_CN_PROXY_BREAKER_FAILURES=3

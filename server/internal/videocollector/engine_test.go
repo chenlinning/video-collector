@@ -56,6 +56,33 @@ func TestRetryExtractorDoesNotRetryPermanentFailures(t *testing.T) {
 	require.Equal(t, 1, attempts)
 }
 
+func TestExtractorErrorClassifiesActionablePlatformFailures(t *testing.T) {
+	tests := []struct {
+		name   string
+		stderr string
+		kind   ExtractorFailureKind
+	}{
+		{name: "platform restriction", stderr: "ERROR: Unable to download webpage: HTTP Error 412: Precondition Failed", kind: ExtractorFailurePlatformRestricted},
+		{name: "authentication", stderr: "ERROR: Cookies (not necessarily logged in) are needed", kind: ExtractorFailureAuthenticationRequired},
+		{name: "drm", stderr: "ERROR: This video is DRM protected", kind: ExtractorFailureDRMProtected},
+		{name: "unsupported", stderr: "ERROR: Unsupported URL: https://example.com/watch", kind: ExtractorFailureUnsupportedURL},
+		{name: "unavailable", stderr: "ERROR: This video has been removed", kind: ExtractorFailureMediaUnavailable},
+		{name: "temporary", stderr: "ERROR: HTTP Error 503: Service Unavailable", kind: ExtractorFailureTemporary},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := extractorError(tt.stderr, errors.New("exit status 1"))
+			var failure *ExtractorFailure
+			require.ErrorAs(t, err, &failure)
+			require.Equal(t, tt.kind, failure.Kind)
+			require.NotEmpty(t, failure.Error())
+			require.NotContains(t, failure.Error(), "https://example.com/watch")
+			require.NotContains(t, failure.Detail, "https://example.com/watch")
+		})
+	}
+}
+
 func TestRetryExtractorHonorsCancellationDuringBackoff(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	attempts := 0

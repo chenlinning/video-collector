@@ -1,10 +1,15 @@
 # Video Collector private, non-caching CONNECT egress.
 # This listener must never be exposed by a public security-group rule.
+pid_filename /run/squid-video-collector.pid
 http_port 10.77.0.2:3128
+visible_hostname video-collector-egress
+httpd_suppress_version_string on
 
 acl us_wireguard_peer src 10.77.0.1/32
 acl too_many_connections maxconn 16
+acl CONNECT method CONNECT
 acl SSL_ports port 443
+acl HTTP_ports port 80
 acl Safe_ports port 80
 acl Safe_ports port 443
 
@@ -32,6 +37,7 @@ acl blocked_ipv6 dst ff00::/8
 
 http_access deny !Safe_ports
 http_access deny CONNECT !SSL_ports
+http_access deny !CONNECT !HTTP_ports
 http_access deny to_localhost
 http_access deny to_linklocal
 http_access deny blocked_ipv4
@@ -43,10 +49,11 @@ http_access deny all
 
 # Never retain media responses or request URLs on the domestic server.
 cache deny all
-cache_dir null /tmp
+# Squid 5 defaults to no disk cache when no cache_dir directive is present.
 cache_mem 0 MB
 maximum_object_size 0 KB
 access_log none
+cache_log /dev/null
 cache_store_log none
 
 # Conservative starting limits; adjust only after measuring server bandwidth.
@@ -62,4 +69,3 @@ read_timeout 5 minutes
 client_lifetime 2 hours
 shutdown_lifetime 5 seconds
 forwarded_for delete
-via off

@@ -1,4 +1,4 @@
-# Install as /etc/wireguard/wg-video-collector.conf on the domestic egress server.
+# Install as /etc/wireguard/wg-vc-egress.conf on the domestic egress server.
 # Replace placeholders locally. Never commit private keys.
 [Interface]
 PrivateKey = <CN_PRIVATE_KEY>

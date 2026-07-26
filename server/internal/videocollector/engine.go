@@ -712,6 +712,11 @@ func runCaptured(ctx context.Context, executable string, args []string) ([]byte,
 }
 
 func extractorError(stderr string, fallback error) error {
+	var failure *ExtractorFailure
+	if errors.As(fallback, &failure) {
+		return failure
+	}
+	detail := ""
 	lines := strings.Split(strings.TrimSpace(stderr), "\n")
 	for i := len(lines) - 1; i >= 0; i-- {
 		line := strings.TrimSpace(lines[i])
@@ -721,10 +726,16 @@ func extractorError(stderr string, fallback error) error {
 			if len(line) > 500 {
 				line = line[:500]
 			}
-			return errors.New(line)
+			detail = line
+			break
 		}
 	}
-	return fmt.Errorf("media extraction failed: %w", fallback)
+	if detail == "" && fallback != nil {
+		detail = safeCommandOutput(nil, fallback)
+	}
+	return &ExtractorFailure{
+		Kind: classifyExtractorFailure(stderr, fallback), Detail: detail, Cause: fallback,
+	}
 }
 
 func EnsureRuntimeFiles(paths ...string) error {
