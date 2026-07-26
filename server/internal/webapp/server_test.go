@@ -3,6 +3,7 @@ package webapp
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/chenlinning/video-collector/server/internal/videocollector"
 	"github.com/stretchr/testify/require"
@@ -66,6 +68,7 @@ func TestServerAllowsAnonymousAPIWithoutLogin(t *testing.T) {
 	startRequest.Header.Set("Content-Type", "application/json")
 	handler.ServeHTTP(start, startRequest)
 	require.Equal(t, http.StatusAccepted, start.Code)
+	requireTaskCompleted(t, manager, start.Body.Bytes())
 	require.NotContains(t, start.Body.String(), `"deleteAt"`)
 	require.NotContains(t, start.Body.String(), `"completedAt"`)
 	require.NotContains(t, start.Header().Get("Set-Cookie"), "session")
@@ -229,6 +232,7 @@ func TestServerAcceptsAnonymousTranscriptionUpload(t *testing.T) {
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	require.Equal(t, http.StatusAccepted, response.Code)
+	requireTaskCompleted(t, manager, response.Body.Bytes())
 	require.NotContains(t, response.Header().Get("Set-Cookie"), "session")
 }
 
@@ -262,4 +266,14 @@ func requestStatus(handler http.Handler, target string) int {
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, target, nil))
 	return recorder.Code
+}
+
+func requireTaskCompleted(t *testing.T, manager *videocollector.Manager, responseBody []byte) {
+	t.Helper()
+	var started videocollector.TaskSnapshot
+	require.NoError(t, json.Unmarshal(responseBody, &started))
+	require.Eventually(t, func() bool {
+		snapshot, err := manager.Get(started.ID)
+		return err == nil && snapshot.State == videocollector.TaskStateCompleted
+	}, time.Second, time.Millisecond)
 }
