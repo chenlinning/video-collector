@@ -27,7 +27,7 @@ interface SessionTask extends DownloadProgress {
   kind: TaskKind;
 }
 
-function Icon({ name }: { name: "audio" | "check" | "clock" | "download" | "file" | "image" | "moon" | "spark" | "subtitle" | "sun" | "video" }) {
+function Icon({ name }: { name: "audio" | "check" | "clock" | "download" | "file" | "image" | "spark" | "subtitle" | "video" }) {
   const paths = {
     audio: <><path d="M9 18V5l10-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="16" cy="16" r="3" /></>,
     check: <path d="m5 12 4 4L19 6" />,
@@ -35,10 +35,8 @@ function Icon({ name }: { name: "audio" | "check" | "clock" | "download" | "file
     download: <path d="M12 3v12m0 0 5-5m-5 5-5-5M5 21h14" />,
     file: <><path d="M6 2h8l4 4v16H6z" /><path d="M14 2v5h5" /></>,
     image: <><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="2" /><path d="m4 18 5-5 4 4 2-2 5 4" /></>,
-    moon: <path d="M20 15.5A8 8 0 0 1 8.5 4 8.5 8.5 0 1 0 20 15.5Z" />,
     spark: <path d="m12 3 1.4 4.6L18 9l-4.6 1.4L12 15l-1.4-4.6L6 9l4.6-1.4L12 3Zm6 11 .8 2.2L21 17l-2.2.8L18 20l-.8-2.2L15 17l2.2-.8L18 14Z" />,
     subtitle: <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M6 14h5m2 0h5M6 10h8" /></>,
-    sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></>,
     video: <><rect x="3" y="5" width="14" height="14" rx="2" /><path d="m17 10 4-2v8l-4-2" /></>
   };
   return <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">{paths[name]}</svg>;
@@ -323,14 +321,6 @@ export default function App() {
   return (
     <div className="app-shell">
       <main className="workspace">
-        <div className="utility-bar">
-          <span>{copy.standaloneWorkspace}</span>
-          <div>
-            <button onClick={() => setLocale(locale === "zh-CN" ? "en" : "zh-CN")}>{locale === "zh-CN" ? "EN" : "中文"}</button>
-            <button aria-label={copy.toggleTheme} onClick={() => setTheme(theme === "dark" ? "light" : "dark")}><Icon name={theme === "dark" ? "sun" : "moon"} /></button>
-          </div>
-        </div>
-
         <section className="hero-card">
           <div className="hero-copy">
             <div className="eyebrow"><Icon name="spark" /> {copy.eyebrow}</div>
