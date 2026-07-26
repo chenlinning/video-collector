@@ -1,6 +1,6 @@
 # Video Collector 国内临时出口代理实施与验收任务书
 
-> 文档状态：本地实现、自动化测试、完整镜像和直连回归完成；国内网络 PoC、发布与生产启用待完成
+> 文档状态：本地实现、自动化测试、镜像发布和生产默认关闭上线完成；国内网络 PoC 与生产启用待完成
 > 创建日期：2026-07-26
 > 当前生产服务器：`47.251.87.147`
 > 当前正式地址：`https://video-collector.ximoai.cn`
@@ -68,7 +68,7 @@
 - `/health` 只增加高层 `egressStatus`，不会返回代理地址、密钥或域名清单。
 - `.env.example`、Compose、生产部署文档和无密钥 WireGuard/Squid 模板已经同步。
 
-本地 Go、前端、Linux race、完整生产镜像和 AcFun 直连下载回归已通过。正式站点当前仍运行旧镜像，`/health` 尚无 `egressStatus`；国内服务器信息、WireGuard/Squid 真实 PoC 和两个国内平台验收尚未提供或执行。
+本地 Go、前端、Linux race、完整生产镜像和 AcFun 直连下载回归已通过。提交 `7c8f1cd` 已发布并以 `VIDEO_COLLECTOR_EGRESS_MODE=off` 部署到正式站点，`/health` 返回 `egressStatus=off`；国内服务器信息、WireGuard/Squid 真实 PoC 和两个国内平台验收尚未提供或执行。
 
 ## 6. 目标架构
 
@@ -461,12 +461,12 @@ VIDEO_COLLECTOR_CN_PROXY_BREAKER_SECONDS=60
 
 ### 阶段 P4：安全上线，功能默认关闭
 
-- [ ] 提交并推送 GitHub。
-- [ ] GitHub Actions 前端、Go 和镜像发布全部成功。
-- [ ] 给当前生产镜像创建回滚标签。
-- [ ] 在 `47.251.87.147` 拉取新镜像。
-- [ ] 保持 `VIDEO_COLLECTOR_EGRESS_MODE=off` 启动。
-- [ ] 验证正式站点、健康检查和现有海外平台无回归。
+- [x] 提交并推送 GitHub。
+- [x] GitHub Actions 前端、Go 和镜像发布全部成功。
+- [x] 给当前生产镜像创建回滚标签。
+- [x] 在 `47.251.87.147` 拉取新镜像。
+- [x] 保持 `VIDEO_COLLECTOR_EGRESS_MODE=off` 启动。
+- [x] 验证正式站点、健康检查和现有直连平台无回归。
 
 ### 阶段 P5：生产启用与真实验收
 
@@ -546,7 +546,7 @@ VIDEO_COLLECTOR_CN_PROXY_BREAKER_SECONDS=60
 - [x] `.env.example`、Compose 和部署文档更新。
 - [ ] 两个平台真实生产验收记录。
 - [x] 带宽、失败率、回退率和代理健康监控说明。
-- [ ] 配置关闭和镜像回滚记录。
+- [x] 配置关闭和镜像回滚记录。
 
 ## 20. 完成定义
 
@@ -580,6 +580,9 @@ VIDEO_COLLECTOR_CN_PROXY_BREAKER_SECONDS=60
 - 镜像：`video-collector:domestic-egress-test` 完整构建成功；默认 `off` 和合法 `auto` 两种容器均启动，`auto` 容器达到 `healthy`，非法公网代理配置被拒绝。
 - 健康信息：默认返回 `egressStatus=off`，合法 `auto` 返回 `available`，响应未包含代理地址、域名规则或密钥。
 - 真实直连回归：AcFun `https://www.acfun.cn/v/ac48722683` 解析和 MP4 下载通过，文件 5,936,297 字节，`X-Delete-At` 剩余约 14.9 分钟。
-- 生产检查：`https://video-collector.ximoai.cn` 首页正常，但当前 `/health` 仍是旧镜像格式，尚无 `egressStatus`。
+- GitHub：提交 `7c8f1cd` 已推送；Actions 运行 `30196946022` 的前端、Go、Linux race 和 GHCR 发布全部成功。
+- 生产部署：服务器运行 `ghcr.io/chenlinning/video-collector:sha-7c8f1cd`，容器 `healthy`，旧镜像回滚标签为 `rollback-pre-egress-20260726-174728`，`.env` 备份为 `.env.bak.pre-egress-20260726-175011`。
+- 公网检查：DNS 仅解析到 `47.251.87.147`，HTTPS 返回 200，`/health` 返回 `status=ok`、`egressStatus=off`；CSP 保持 `frame-ancestors *` 且无 `X-Frame-Options`。
+- 生产页面：AcFun 解析返回 3 个格式，720p 任务完成；点击下载后页面显示首次下载已触发和约 15 分钟删除时间。当前内置浏览器插件没有上报通用 `download` 事件，因此本次会话不把浏览器文件落盘标记为新的通过证据；此前版本的原生下载通过记录仍保留在 `DEPLOYMENT.md`。
 
-尚未完成且不得跳过：第 4 节国内服务器信息、P1 网络 PoC、Squid 真实语法/ACL/公网隔离验收、GitHub/GHCR 发布、生产默认关闭上线、两个国内平台真实验收及故障/回滚演练。
+尚未完成且不得跳过：第 4 节国内服务器信息、P1 网络 PoC、Squid 真实语法/ACL/公网隔离验收、两个国内平台真实验收及故障/回滚演练。

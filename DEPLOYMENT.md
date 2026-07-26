@@ -613,7 +613,9 @@ curl -fsS http://127.0.0.1:8787/health
 
 生产验收记录（2026-07-26）：
 
-- 当前运行提交：`a31d4f6`；GitHub Actions：`30188369329`。
+- 当前运行提交：`7c8f1cd`；GitHub Actions：`30196946022`；镜像：`ghcr.io/chenlinning/video-collector:sha-7c8f1cd`。
+- 国内出口基础能力已随当前镜像上线但明确保持 `VIDEO_COLLECTOR_EGRESS_MODE=off`；公网 `/health` 返回 `egressStatus=off`。
+- 部署前镜像回滚标签：`rollback-pre-egress-20260726-174728`；部署前 `.env` 备份：`.env.bak.pre-egress-20260726-175011`。
 - AcFun MP4 文件 5,936,297 字节，SHA-256：`1A7F2473287DA4D9391463D4F067121AF59F2AEB3805B2E17CC30C1A2E0DFE89`。
 - TikTok 文件 15,217,445 字节，SHA-256：`8165BBE71146F9CD633F89787AFBAAE8912C1E89CA51DCE8445D0FBB2BABF8C3`。
 - SoundCloud MP3 为 549,165 字节，图片为 40,518 字节，公开集合返回 10 条；URL 转录生成 429 字节 SRT。
