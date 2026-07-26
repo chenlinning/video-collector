@@ -115,6 +115,88 @@ func TestServerAllowsEmbeddingFromOtherSites(t *testing.T) {
 	require.Empty(t, response.Header().Get("X-Frame-Options"))
 }
 
+func TestServerSoftEmbedGateRequiresIframeBootstrapAndSession(t *testing.T) {
+	manager, err := videocollector.NewManager(videocollector.ManagerConfig{
+		Root: t.TempDir(), MaxConcurrent: 1,
+	}, serverEngineStub{})
+	require.NoError(t, err)
+
+	webRoot := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(webRoot, "index.html"), []byte("<html>collector</html>"), 0o600))
+	now := time.Date(2026, time.July, 26, 12, 0, 0, 0, time.UTC)
+	handler, err := NewServer(ServerConfig{
+		Manager:             manager,
+		WebRoot:             webRoot,
+		EmbedMode:           EmbedModeSoft,
+		EmbedAllowedOrigins: []string{"https://ximoai.cn", "https://www.ximoai.cn"},
+		EmbedSessionTTL:     time.Hour,
+		Now:                 func() time.Time { return now },
+	})
+	require.NoError(t, err)
+
+	direct := httptest.NewRecorder()
+	handler.ServeHTTP(direct, httptest.NewRequest(http.MethodGet, "/", nil))
+	require.Equal(t, http.StatusForbidden, direct.Code)
+
+	directAPI := httptest.NewRecorder()
+	apiRequest := httptest.NewRequest(http.MethodPost, "/api/v1/media/parse", strings.NewReader(`{"url":"https://example.com/video"}`))
+	apiRequest.Header.Set("Content-Type", "application/json")
+	handler.ServeHTTP(directAPI, apiRequest)
+	require.Equal(t, http.StatusForbidden, directAPI.Code)
+
+	bootstrapRequest := httptest.NewRequest(http.MethodGet, "/", nil)
+	bootstrapRequest.Header.Set("Sec-Fetch-Dest", "iframe")
+	bootstrapRequest.Header.Set("Sec-Fetch-Site", "same-site")
+	bootstrapRequest.Header.Set("Referer", "https://ximoai.cn/tools/video")
+	bootstrap := httptest.NewRecorder()
+	handler.ServeHTTP(bootstrap, bootstrapRequest)
+	require.Equal(t, http.StatusOK, bootstrap.Code)
+	require.Contains(t, bootstrap.Header().Get("Set-Cookie"), "vc_embed_session=")
+	require.Contains(t, bootstrap.Header().Get("Content-Security-Policy"), "frame-ancestors https://www.ximoai.cn https://ximoai.cn")
+	require.NotContains(t, bootstrap.Header().Get("Content-Security-Policy"), "frame-ancestors *")
+	require.Empty(t, bootstrap.Header().Get("X-Frame-Options"))
+
+	cookies := bootstrap.Result().Cookies()
+	require.Len(t, cookies, 1)
+
+	withSession := httptest.NewRecorder()
+	withSessionRequest := httptest.NewRequest(http.MethodPost, "/api/v1/media/parse", strings.NewReader(`{"url":"https://example.com/video"}`))
+	withSessionRequest.Header.Set("Content-Type", "application/json")
+	withSessionRequest.AddCookie(cookies[0])
+	handler.ServeHTTP(withSession, withSessionRequest)
+	require.Equal(t, http.StatusOK, withSession.Code)
+
+	health := httptest.NewRecorder()
+	handler.ServeHTTP(health, httptest.NewRequest(http.MethodGet, "/health", nil))
+	require.Equal(t, http.StatusOK, health.Code)
+}
+
+func TestServerSoftEmbedGateRejectsWrongParentAndDirectAssets(t *testing.T) {
+	manager, err := videocollector.NewManager(videocollector.ManagerConfig{Root: t.TempDir(), MaxConcurrent: 1}, serverEngineStub{})
+	require.NoError(t, err)
+	webRoot := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(webRoot, "index.html"), []byte("<html>collector</html>"), 0o600))
+	handler, err := NewServer(ServerConfig{
+		Manager:             manager,
+		WebRoot:             webRoot,
+		EmbedMode:           EmbedModeSoft,
+		EmbedAllowedOrigins: []string{"https://ximoai.cn"},
+	})
+	require.NoError(t, err)
+
+	wrongParent := httptest.NewRequest(http.MethodGet, "/", nil)
+	wrongParent.Header.Set("Sec-Fetch-Dest", "iframe")
+	wrongParent.Header.Set("Sec-Fetch-Site", "cross-site")
+	wrongParent.Header.Set("Referer", "https://attacker.example/iframe")
+	wrongParentResult := httptest.NewRecorder()
+	handler.ServeHTTP(wrongParentResult, wrongParent)
+	require.Equal(t, http.StatusForbidden, wrongParentResult.Code)
+
+	directAsset := httptest.NewRecorder()
+	handler.ServeHTTP(directAsset, httptest.NewRequest(http.MethodGet, "/index.html", nil))
+	require.Equal(t, http.StatusForbidden, directAsset.Code)
+}
+
 func TestServerRateLimitsAnonymousParseRequestsByIP(t *testing.T) {
 	manager, err := videocollector.NewManager(videocollector.ManagerConfig{
 		Root: t.TempDir(), MaxConcurrent: 1,

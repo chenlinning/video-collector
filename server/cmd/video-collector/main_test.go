@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/chenlinning/video-collector/server/internal/videocollector"
+	"github.com/chenlinning/video-collector/server/internal/webapp"
 	"github.com/stretchr/testify/require"
 )
 
@@ -38,6 +39,36 @@ func TestLoadConfigValidatesAutomaticEgress(t *testing.T) {
 	require.Equal(t, []string{"bilibili.com", "b23.tv"}, config.egress.SourceHosts)
 	require.Equal(t, 30*time.Minute, config.egress.RouteTTL)
 	require.Equal(t, 5*time.Second, config.egress.ConnectTimeout)
+}
+
+func TestLoadEmbedConfigDefaultsToDisabled(t *testing.T) {
+	clearEgressEnvironment(t)
+	clearEmbedEnvironment(t)
+	mode, origins, ttl, err := loadEmbedConfig()
+	require.NoError(t, err)
+	require.Equal(t, webapp.EmbedModeOff, mode)
+	require.Empty(t, origins)
+	require.Equal(t, time.Hour, ttl)
+}
+
+func TestLoadEmbedConfigValidatesSoftMode(t *testing.T) {
+	clearEgressEnvironment(t)
+	clearEmbedEnvironment(t)
+	t.Setenv("VIDEO_COLLECTOR_EMBED_MODE", "soft")
+	_, _, _, err := loadEmbedConfig()
+	require.Error(t, err)
+
+	t.Setenv("VIDEO_COLLECTOR_EMBED_ALLOWED_ORIGINS", "https://ximoai.cn, https://www.ximoai.cn")
+	t.Setenv("VIDEO_COLLECTOR_EMBED_SESSION_TTL_SECONDS", "7200")
+	mode, origins, ttl, err := loadEmbedConfig()
+	require.NoError(t, err)
+	require.Equal(t, webapp.EmbedModeSoft, mode)
+	require.Equal(t, []string{"https://ximoai.cn", "https://www.ximoai.cn"}, origins)
+	require.Equal(t, 2*time.Hour, ttl)
+
+	t.Setenv("VIDEO_COLLECTOR_EMBED_ALLOWED_ORIGINS", "https://ximoai.cn,,https://www.ximoai.cn")
+	_, _, _, err = loadEmbedConfig()
+	require.Error(t, err)
 }
 
 func TestLoadConfigRejectsUnsafeEgressValues(t *testing.T) {
@@ -81,6 +112,15 @@ func clearEgressEnvironment(t *testing.T) {
 		"VIDEO_COLLECTOR_CN_PROXY_SOURCE_HOSTS", "VIDEO_COLLECTOR_CN_PROXY_ROUTE_TTL_SECONDS",
 		"VIDEO_COLLECTOR_CN_PROXY_CONNECT_TIMEOUT_SECONDS", "VIDEO_COLLECTOR_CN_PROXY_BREAKER_FAILURES",
 		"VIDEO_COLLECTOR_CN_PROXY_BREAKER_SECONDS",
+	} {
+		t.Setenv(name, "")
+	}
+}
+
+func clearEmbedEnvironment(t *testing.T) {
+	for _, name := range []string{
+		"VIDEO_COLLECTOR_EMBED_MODE", "VIDEO_COLLECTOR_EMBED_ALLOWED_ORIGINS",
+		"VIDEO_COLLECTOR_EMBED_SESSION_TTL_SECONDS",
 	} {
 		t.Setenv(name, "")
 	}

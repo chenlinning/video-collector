@@ -49,14 +49,17 @@ func main() {
 	defer manager.Close()
 
 	handler, err := webapp.NewServer(webapp.ServerConfig{
-		Manager:         manager,
-		WebRoot:         config.webRoot,
-		ParseRateLimit:  config.parseRateLimit,
-		TaskRateLimit:   config.taskRateLimit,
-		ParseRateWindow: 15 * time.Minute,
-		TaskRateWindow:  time.Hour,
-		TrustProxy:      config.trustProxy,
-		EgressStatus:    func() string { return string(egress.Status()) },
+		Manager:             manager,
+		WebRoot:             config.webRoot,
+		ParseRateLimit:      config.parseRateLimit,
+		TaskRateLimit:       config.taskRateLimit,
+		ParseRateWindow:     15 * time.Minute,
+		TaskRateWindow:      time.Hour,
+		TrustProxy:          config.trustProxy,
+		EgressStatus:        func() string { return string(egress.Status()) },
+		EmbedMode:           config.embedMode,
+		EmbedAllowedOrigins: config.embedAllowedOrigins,
+		EmbedSessionTTL:     config.embedSessionTTL,
 		Runtime: webapp.RuntimeStatus{
 			YTDLPVersion:   commandVersion(config.ytDLPPath, "--version"),
 			FFmpegVersion:  commandVersion(config.ffmpegPath, "-version"),
@@ -108,21 +111,24 @@ func main() {
 }
 
 type appConfig struct {
-	listenAddress    string
-	tempRoot         string
-	webRoot          string
-	ytDLPPath        string
-	ffmpegPath       string
-	whisperPath      string
-	whisperModelPath string
-	whisperVersion   string
-	maxConcurrent    int
-	maxQueued        int
-	parseRateLimit   int
-	taskRateLimit    int
-	taskTimeout      time.Duration
-	trustProxy       bool
-	egress           videocollector.EgressConfig
+	listenAddress       string
+	tempRoot            string
+	webRoot             string
+	ytDLPPath           string
+	ffmpegPath          string
+	whisperPath         string
+	whisperModelPath    string
+	whisperVersion      string
+	maxConcurrent       int
+	maxQueued           int
+	parseRateLimit      int
+	taskRateLimit       int
+	taskTimeout         time.Duration
+	trustProxy          bool
+	embedMode           string
+	embedAllowedOrigins []string
+	embedSessionTTL     time.Duration
+	egress              videocollector.EgressConfig
 }
 
 func loadConfig() (appConfig, error) {
@@ -150,24 +156,58 @@ func loadConfig() (appConfig, error) {
 	if err != nil {
 		return appConfig{}, err
 	}
+	embedMode, embedAllowedOrigins, embedSessionTTL, err := loadEmbedConfig()
+	if err != nil {
+		return appConfig{}, err
+	}
 	config := appConfig{
-		listenAddress:    envOrDefault("VIDEO_COLLECTOR_LISTEN", "127.0.0.1:8787"),
-		tempRoot:         envOrDefault("VIDEO_COLLECTOR_TEMP_ROOT", "/app/cache/tasks"),
-		webRoot:          envOrDefault("VIDEO_COLLECTOR_WEB_ROOT", "/app/web"),
-		ytDLPPath:        envOrDefault("YTDLP_PATH", "/usr/local/bin/yt-dlp"),
-		ffmpegPath:       envOrDefault("FFMPEG_PATH", "/usr/bin/ffmpeg"),
-		whisperPath:      envOrDefault("WHISPER_PATH", "/usr/local/bin/whisper-cli"),
-		whisperModelPath: envOrDefault("WHISPER_MODEL_PATH", "/app/models/ggml-base.bin"),
-		whisperVersion:   envOrDefault("WHISPER_VERSION", "whisper.cpp"),
-		maxConcurrent:    maxConcurrent,
-		maxQueued:        maxQueued,
-		parseRateLimit:   parseRateLimit,
-		taskRateLimit:    taskRateLimit,
-		taskTimeout:      time.Duration(taskTimeoutSeconds) * time.Second,
-		trustProxy:       envBool("VIDEO_COLLECTOR_TRUST_PROXY", false),
-		egress:           egress,
+		listenAddress:       envOrDefault("VIDEO_COLLECTOR_LISTEN", "127.0.0.1:8787"),
+		tempRoot:            envOrDefault("VIDEO_COLLECTOR_TEMP_ROOT", "/app/cache/tasks"),
+		webRoot:             envOrDefault("VIDEO_COLLECTOR_WEB_ROOT", "/app/web"),
+		ytDLPPath:           envOrDefault("YTDLP_PATH", "/usr/local/bin/yt-dlp"),
+		ffmpegPath:          envOrDefault("FFMPEG_PATH", "/usr/bin/ffmpeg"),
+		whisperPath:         envOrDefault("WHISPER_PATH", "/usr/local/bin/whisper-cli"),
+		whisperModelPath:    envOrDefault("WHISPER_MODEL_PATH", "/app/models/ggml-base.bin"),
+		whisperVersion:      envOrDefault("WHISPER_VERSION", "whisper.cpp"),
+		maxConcurrent:       maxConcurrent,
+		maxQueued:           maxQueued,
+		parseRateLimit:      parseRateLimit,
+		taskRateLimit:       taskRateLimit,
+		taskTimeout:         time.Duration(taskTimeoutSeconds) * time.Second,
+		trustProxy:          envBool("VIDEO_COLLECTOR_TRUST_PROXY", false),
+		embedMode:           embedMode,
+		embedAllowedOrigins: embedAllowedOrigins,
+		embedSessionTTL:     embedSessionTTL,
+		egress:              egress,
 	}
 	return config, nil
+}
+
+func loadEmbedConfig() (string, []string, time.Duration, error) {
+	mode := strings.ToLower(envOrDefault("VIDEO_COLLECTOR_EMBED_MODE", webapp.EmbedModeOff))
+	if mode != webapp.EmbedModeOff && mode != webapp.EmbedModeSoft {
+		return "", nil, 0, errors.New("VIDEO_COLLECTOR_EMBED_MODE must be off or soft")
+	}
+	ttlSeconds, err := envIntBetween("VIDEO_COLLECTOR_EMBED_SESSION_TTL_SECONDS", 3600, 60, 86400)
+	if err != nil {
+		return "", nil, 0, err
+	}
+	rawOrigins := strings.TrimSpace(os.Getenv("VIDEO_COLLECTOR_EMBED_ALLOWED_ORIGINS"))
+	if mode == webapp.EmbedModeOff && rawOrigins == "" {
+		return mode, nil, time.Duration(ttlSeconds) * time.Second, nil
+	}
+	if rawOrigins == "" {
+		return "", nil, 0, errors.New("VIDEO_COLLECTOR_EMBED_ALLOWED_ORIGINS is required in soft mode")
+	}
+	origins := make([]string, 0, 2)
+	for _, value := range strings.Split(rawOrigins, ",") {
+		origin := strings.TrimSpace(value)
+		if origin == "" {
+			return "", nil, 0, errors.New("VIDEO_COLLECTOR_EMBED_ALLOWED_ORIGINS contains an empty rule")
+		}
+		origins = append(origins, origin)
+	}
+	return mode, origins, time.Duration(ttlSeconds) * time.Second, nil
 }
 
 func loadEgressConfig() (videocollector.EgressConfig, error) {

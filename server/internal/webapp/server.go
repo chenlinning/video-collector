@@ -1,16 +1,21 @@
 package webapp
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/chenlinning/video-collector/server/internal/videocollector"
@@ -23,28 +28,44 @@ type RuntimeStatus struct {
 	WhisperModel   string `json:"whisperModel"`
 }
 
+const (
+	EmbedModeOff  = "off"
+	EmbedModeSoft = "soft"
+)
+
+const embedSessionCookieName = "vc_embed_session"
+
 type ServerConfig struct {
-	Manager         *videocollector.Manager
-	WebRoot         string
-	Runtime         RuntimeStatus
-	ParseRateLimit  int
-	TaskRateLimit   int
-	ParseRateWindow time.Duration
-	TaskRateWindow  time.Duration
-	TrustProxy      bool
-	EgressStatus    func() string
-	Now             func() time.Time
+	Manager             *videocollector.Manager
+	WebRoot             string
+	Runtime             RuntimeStatus
+	ParseRateLimit      int
+	TaskRateLimit       int
+	ParseRateWindow     time.Duration
+	TaskRateWindow      time.Duration
+	TrustProxy          bool
+	EgressStatus        func() string
+	Now                 func() time.Time
+	EmbedMode           string
+	EmbedAllowedOrigins []string
+	EmbedSessionTTL     time.Duration
 }
 
 type Server struct {
-	manager      *videocollector.Manager
-	webRoot      string
-	runtime      RuntimeStatus
-	trustProxy   bool
-	parseLimiter *rateLimiter
-	taskLimiter  *rateLimiter
-	egressStatus func() string
-	mux          *http.ServeMux
+	manager       *videocollector.Manager
+	webRoot       string
+	runtime       RuntimeStatus
+	trustProxy    bool
+	parseLimiter  *rateLimiter
+	taskLimiter   *rateLimiter
+	egressStatus  func() string
+	mux           *http.ServeMux
+	embedMode     string
+	embedOrigins  map[string]struct{}
+	embedTTL      time.Duration
+	now           func() time.Time
+	embedMu       sync.Mutex
+	embedSessions map[string]time.Time
 }
 
 func NewServer(config ServerConfig) (*Server, error) {
@@ -66,6 +87,26 @@ func NewServer(config ServerConfig) (*Server, error) {
 	if config.EgressStatus == nil {
 		config.EgressStatus = func() string { return "off" }
 	}
+	if config.EmbedMode == "" {
+		config.EmbedMode = EmbedModeOff
+	}
+	if config.EmbedMode != EmbedModeOff && config.EmbedMode != EmbedModeSoft {
+		return nil, errors.New("embed mode must be off or soft")
+	}
+	if config.EmbedSessionTTL <= 0 {
+		config.EmbedSessionTTL = time.Hour
+	}
+	embedOrigins, err := normalizeEmbedOrigins(config.EmbedAllowedOrigins)
+	if err != nil {
+		return nil, err
+	}
+	if config.EmbedMode == EmbedModeSoft && len(embedOrigins) == 0 {
+		return nil, errors.New("soft embed mode requires allowed parent origins")
+	}
+	now := config.Now
+	if now == nil {
+		now = time.Now
+	}
 	webRoot, err := filepath.Abs(strings.TrimSpace(config.WebRoot))
 	if err != nil {
 		return nil, err
@@ -79,7 +120,9 @@ func NewServer(config ServerConfig) (*Server, error) {
 		parseLimiter: newRateLimiter(config.ParseRateLimit, config.ParseRateWindow, config.Now),
 		taskLimiter:  newRateLimiter(config.TaskRateLimit, config.TaskRateWindow, config.Now),
 		egressStatus: config.EgressStatus,
-		mux:          http.NewServeMux(),
+		mux:          http.NewServeMux(), embedMode: config.EmbedMode,
+		embedOrigins: embedOrigins, embedTTL: config.EmbedSessionTTL, now: now,
+		embedSessions: make(map[string]time.Time),
 	}
 	server.routes()
 	return server, nil
@@ -107,11 +150,129 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'; frame-ancestors *; base-uri 'self'; form-action 'none'")
+	frameAncestors := "*"
+	if s.embedMode == EmbedModeSoft {
+		origins := make([]string, 0, len(s.embedOrigins))
+		for origin := range s.embedOrigins {
+			origins = append(origins, origin)
+		}
+		// Sorting keeps the header deterministic for tests and cache keys.
+		sort.Strings(origins)
+		frameAncestors = strings.Join(origins, " ")
+		w.Header().Set("Vary", "Sec-Fetch-Dest, Sec-Fetch-Site, Origin, Referer, Cookie")
+	}
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'; frame-ancestors "+frameAncestors+"; base-uri 'self'; form-action 'none'")
 	if strings.HasPrefix(r.URL.Path, "/api/") {
 		w.Header().Set("Cache-Control", "no-store")
 	}
+	if s.embedMode == EmbedModeSoft && !s.embedAccess(w, r) {
+		return
+	}
 	s.mux.ServeHTTP(w, r)
+}
+
+func normalizeEmbedOrigins(values []string) (map[string]struct{}, error) {
+	origins := make(map[string]struct{}, len(values))
+	for _, raw := range values {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			return nil, errors.New("embed allowed origins contain an empty value")
+		}
+		parsed, err := url.Parse(raw)
+		if err != nil || parsed.User != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+			return nil, fmt.Errorf("invalid embed allowed origin %q", raw)
+		}
+		origins[strings.ToLower(parsed.Scheme)+"://"+strings.ToLower(parsed.Host)] = struct{}{}
+	}
+	return origins, nil
+}
+
+func (s *Server) embedAccess(w http.ResponseWriter, r *http.Request) bool {
+	if r.URL.Path == "/health" {
+		return true
+	}
+	if s.hasEmbedSession(r) {
+		return true
+	}
+	if r.Method == http.MethodGet && (r.URL.Path == "/" || r.URL.Path == "/index.html") && s.isAllowedIframeRequest(r) {
+		return s.issueEmbedSession(w)
+	}
+	writeJSONError(w, http.StatusForbidden, "仅允许通过主站嵌入页面访问")
+	return false
+}
+
+func (s *Server) isAllowedIframeRequest(r *http.Request) bool {
+	if strings.ToLower(strings.TrimSpace(r.Header.Get("Sec-Fetch-Dest"))) != "iframe" {
+		return false
+	}
+	fetchSite := strings.ToLower(strings.TrimSpace(r.Header.Get("Sec-Fetch-Site")))
+	if fetchSite != "same-site" && fetchSite != "same-origin" {
+		return false
+	}
+	seenParent := false
+	if origin := strings.TrimSpace(r.Header.Get("Origin")); origin != "" {
+		seenParent = true
+		if !s.isAllowedOrigin(origin) {
+			return false
+		}
+	}
+	if referer := strings.TrimSpace(r.Header.Get("Referer")); referer != "" {
+		seenParent = true
+		parsed, err := url.Parse(referer)
+		if err != nil || !s.isAllowedOrigin(parsed.Scheme+"://"+parsed.Host) {
+			return false
+		}
+	}
+	return seenParent
+}
+
+func (s *Server) isAllowedOrigin(raw string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.User != nil || parsed.Host == "" || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return false
+	}
+	origin := strings.ToLower(parsed.Scheme) + "://" + strings.ToLower(parsed.Host)
+	_, ok := s.embedOrigins[origin]
+	return ok
+}
+
+func (s *Server) hasEmbedSession(r *http.Request) bool {
+	cookie, err := r.Cookie(embedSessionCookieName)
+	if err != nil || cookie.Value == "" {
+		return false
+	}
+	now := s.now()
+	s.embedMu.Lock()
+	defer s.embedMu.Unlock()
+	expires, ok := s.embedSessions[cookie.Value]
+	if !ok || !now.Before(expires) {
+		delete(s.embedSessions, cookie.Value)
+		return false
+	}
+	return true
+}
+
+func (s *Server) issueEmbedSession(w http.ResponseWriter) bool {
+	var tokenBytes [32]byte
+	if _, err := rand.Read(tokenBytes[:]); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "无法建立嵌入会话")
+		return false
+	}
+	token := base64.RawURLEncoding.EncodeToString(tokenBytes[:])
+	expires := s.now().Add(s.embedTTL)
+	s.embedMu.Lock()
+	for value, expiry := range s.embedSessions {
+		if !s.now().Before(expiry) {
+			delete(s.embedSessions, value)
+		}
+	}
+	s.embedSessions[token] = expires
+	s.embedMu.Unlock()
+	http.SetCookie(w, &http.Cookie{
+		Name: embedSessionCookieName, Value: token, Path: "/", MaxAge: max(1, int(s.embedTTL.Seconds())),
+		Expires: expires, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode,
+	})
+	return true
 }
 
 func (s *Server) withRateLimit(limiter *rateLimiter, next http.HandlerFunc) http.HandlerFunc {
@@ -313,6 +474,9 @@ func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-cache")
 	} else {
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	}
+	if s.embedMode == EmbedModeSoft {
+		w.Header().Set("Cache-Control", "no-store")
 	}
 	http.ServeFile(w, r, candidate)
 }
