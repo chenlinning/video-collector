@@ -61,11 +61,23 @@ func waitForCompletedTask(t *testing.T, manager *Manager, taskID string) TaskSna
 	return TaskSnapshot{}
 }
 
-func TestManagerUsesRandomTaskCapabilityAndExpiresTenMinutesAfterDownload(t *testing.T) {
+func TestManagerDefaultsToFifteenMinuteDownloadAndThirtyMinuteUnclaimedRetention(t *testing.T) {
+	manager, err := NewManager(ManagerConfig{
+		Root:          t.TempDir(),
+		MaxConcurrent: 1,
+	}, engineStub{})
+	require.NoError(t, err)
+	defer manager.Close()
+
+	require.Equal(t, 15*time.Minute, manager.downloadRetention)
+	require.Equal(t, 30*time.Minute, manager.unclaimedRetention)
+}
+
+func TestManagerUsesRandomTaskCapabilityAndExpiresFifteenMinutesAfterDownload(t *testing.T) {
 	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
 	manager, err := NewManager(ManagerConfig{
 		Root:               t.TempDir(),
-		DownloadRetention:  10 * time.Minute,
+		DownloadRetention:  15 * time.Minute,
 		UnclaimedRetention: 30 * time.Minute,
 		MaxConcurrent:      1,
 		Now:                func() time.Time { return now },
@@ -89,7 +101,7 @@ func TestManagerUsesRandomTaskCapabilityAndExpiresTenMinutesAfterDownload(t *tes
 
 	lease, err := manager.OpenDownload(task.ID)
 	require.NoError(t, err)
-	require.Equal(t, now.Add(10*time.Minute), lease.DeleteAt)
+	require.Equal(t, now.Add(15*time.Minute), lease.DeleteAt)
 	require.NoError(t, lease.Close())
 	firstDeleteAt := lease.DeleteAt
 
@@ -115,7 +127,7 @@ func TestManagerRemovesUnclaimedFiles(t *testing.T) {
 	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
 	manager, err := NewManager(ManagerConfig{
 		Root:               t.TempDir(),
-		DownloadRetention:  10 * time.Minute,
+		DownloadRetention:  15 * time.Minute,
 		UnclaimedRetention: 30 * time.Minute,
 		MaxConcurrent:      1,
 		Now:                func() time.Time { return now },

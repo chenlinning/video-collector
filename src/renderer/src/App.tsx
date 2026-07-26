@@ -8,21 +8,24 @@ import type {
   VideoCollectorApi
 } from "../../shared/contracts";
 import { loadTheme, saveTheme, type Theme } from "./theme";
+import {
+  buildPreferencesReadyMessage,
+  readParentTheme,
+  resolveParentOrigin
+} from "./theme-bridge";
 import { createWebVideoCollectorApi, saveWebDownload } from "./web-api";
 
 const webMode = !window.videoCollector;
 const api: VideoCollectorApi = window.videoCollector ?? createWebVideoCollectorApi();
 
-function Icon({ name }: { name: "download" | "folder" | "play" | "clock" | "trash" | "spark" | "sun" | "moon" }) {
+function Icon({ name }: { name: "download" | "folder" | "play" | "clock" | "trash" | "spark" }) {
   const paths = {
     download: <path d="M12 3v12m0 0 5-5m-5 5-5-5M5 21h14" />,
     folder: <path d="M3 7h7l2 2h9v10H3V7Zm0 0V5h7l2 2" />,
     play: <path d="m9 7 8 5-8 5V7Z" />,
     clock: <path d="M12 7v5l3 2m6-2a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />,
     trash: <path d="M4 7h16M9 7V4h6v3m3 0-1 14H7L6 7m4 4v6m4-6v6" />,
-    spark: <path d="m12 3 1.4 4.6L18 9l-4.6 1.4L12 15l-1.4-4.6L6 9l4.6-1.4L12 3Zm6 11 .8 2.2L21 17l-2.2.8L18 20l-.8-2.2L15 17l2.2-.8L18 14Z" />,
-    sun: <path d="M12 3v2m0 14v2M3 12h2m14 0h2m-3.64-6.36-1.42 1.42M8.06 15.94l-1.42 1.42m0-11.72 1.42 1.42m7.88 8.88 1.42 1.42M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z" />,
-    moon: <path d="M20 15.2A8.5 8.5 0 0 1 8.8 4 8.5 8.5 0 1 0 20 15.2Z" />
+    spark: <path d="m12 3 1.4 4.6L18 9l-4.6 1.4L12 15l-1.4-4.6L6 9l4.6-1.4L12 3Zm6 11 .8 2.2L21 17l-2.2.8L18 20l-.8-2.2L15 17l2.2-.8L18 14Z" />
   };
   return <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">{paths[name]}</svg>;
 }
@@ -98,6 +101,20 @@ export default function App() {
     document.documentElement.dataset.theme = theme;
     saveTheme(window.localStorage, theme);
   }, [theme]);
+
+  useEffect(() => {
+    if (window.parent === window) return;
+    const parentOrigin = resolveParentOrigin(document.referrer);
+    if (!parentOrigin) return;
+
+    const handlePreferences = (event: MessageEvent) => {
+      const nextTheme = readParentTheme(event, window.parent, parentOrigin);
+      if (nextTheme) setTheme(nextTheme);
+    };
+    window.addEventListener("message", handlePreferences);
+    window.parent.postMessage(buildPreferencesReadyMessage(), parentOrigin);
+    return () => window.removeEventListener("message", handlePreferences);
+  }, []);
 
   useEffect(() => {
     void api.getRuntimeStatus().then((status) => {
@@ -194,34 +211,13 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <header className="topbar">
-        <div className="brand">
-          <div className="brand-mark"><Icon name="play" /></div>
-          <div>
-            <strong>Video Collector</strong>
-            <span>视频收藏器</span>
-          </div>
-        </div>
-        <div className="topbar-actions">
-          <button
-            type="button"
-            className="theme-toggle"
-            data-testid="theme-toggle"
-            aria-label={theme === "dark" ? "切换到浅色主题" : "切换到深色主题"}
-            aria-pressed={theme === "light"}
-            onClick={() => setTheme((current) => current === "dark" ? "light" : "dark")}
-          >
-            <Icon name={theme === "dark" ? "sun" : "moon"} />
-            <span>{theme === "dark" ? "浅色" : "深色"}</span>
-          </button>
-          <div className="privacy-pill"><span /> {webMode ? "临时处理 · 下载后 10 分钟删除" : "本地处理 · 数据不上传"}</div>
-        </div>
-      </header>
-
       <main className="workspace">
         <section className="content-column">
           <div className="hero-card">
-            <div className="eyebrow"><Icon name="spark" /> PUBLIC MEDIA COLLECTOR</div>
+            <div className="hero-meta">
+              <div className="eyebrow"><Icon name="spark" /> PUBLIC MEDIA COLLECTOR</div>
+              <div className="privacy-pill"><span /> {webMode ? "服务器不永久保存 · 未下载 30 分钟删除 · 下载后 15 分钟删除" : "本地处理 · 数据不上传"}</div>
+            </div>
             <h1>收藏喜欢的视频，<em>简单一点。</em></h1>
             <p>{webMode ? "粘贴公开页面链接，由独立服务完成解析、画质选择与临时下载。" : "粘贴公开页面链接，在本地完成解析、画质选择与下载。"}</p>
             <div className="url-composer">
@@ -384,7 +380,7 @@ export default function App() {
             <div className="history-heading"><div><span>临时文件</span><small>自动清理</small></div></div>
             <div className="history-empty">
               <Icon name="clock" />
-              <p>首次下载后保留 10 分钟；未领取文件 30 分钟后删除。</p>
+              <p>文件仅临时保存在服务器；未点击下载 30 分钟自动删除，点击下载后 15 分钟自动删除。</p>
             </div>
           </section>}
 

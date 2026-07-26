@@ -24,6 +24,11 @@ var (
 
 var unsafeFileNameChars = regexp.MustCompile(`[\\/:*?"<>|\x00-\x1f]+`)
 
+const (
+	DefaultDownloadRetention  = 15 * time.Minute
+	DefaultUnclaimedRetention = 30 * time.Minute
+)
+
 type ManagerConfig struct {
 	Root               string
 	DownloadRetention  time.Duration
@@ -61,10 +66,10 @@ func NewManager(config ManagerConfig, engine Engine) (*Manager, error) {
 		return nil, ErrInvalidDownload
 	}
 	if config.DownloadRetention <= 0 {
-		config.DownloadRetention = 10 * time.Minute
+		config.DownloadRetention = DefaultDownloadRetention
 	}
 	if config.UnclaimedRetention <= 0 {
-		config.UnclaimedRetention = 30 * time.Minute
+		config.UnclaimedRetention = DefaultUnclaimedRetention
 	}
 	if config.MaxConcurrent <= 0 {
 		config.MaxConcurrent = 2

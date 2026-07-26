@@ -29,8 +29,8 @@ func main() {
 	engine := videocollector.NewYTDLPEngine(config.ytDLPPath, config.ffmpegPath, nil)
 	manager, err := videocollector.NewManager(videocollector.ManagerConfig{
 		Root:               config.tempRoot,
-		DownloadRetention:  10 * time.Minute,
-		UnclaimedRetention: 30 * time.Minute,
+		DownloadRetention:  videocollector.DefaultDownloadRetention,
+		UnclaimedRetention: videocollector.DefaultUnclaimedRetention,
 		MaxConcurrent:      config.maxConcurrent,
 		MaxQueued:          config.maxQueued,
 		TaskTimeout:        config.taskTimeout,
