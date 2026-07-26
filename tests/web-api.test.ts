@@ -70,6 +70,35 @@ describe("web video collector API", () => {
     expect(anchor.remove).toHaveBeenCalledOnce();
   });
 
+  it("uses the browser download flow even when a save file picker is available", async () => {
+    const picker = vi.fn(async () => ({
+      createWritable: vi.fn(async () => ({
+        write: vi.fn(async () => undefined),
+        close: vi.fn(async () => undefined)
+      }))
+    }));
+    const anchor = {
+      href: "",
+      download: "",
+      click: vi.fn(),
+      remove: vi.fn()
+    };
+    const append = vi.fn();
+    vi.stubGlobal("window", { showSaveFilePicker: picker });
+    vi.stubGlobal("document", {
+      createElement: vi.fn(() => anchor),
+      body: { append }
+    });
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("video-data"));
+
+    await saveWebDownload("task-1", "video.mp4");
+
+    expect(picker).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(append).toHaveBeenCalledWith(anchor);
+    expect(anchor.click).toHaveBeenCalledOnce();
+  });
+
   it("emits a cancelled state after cancelling an anonymous task", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 204 }));
     const listener = vi.fn();

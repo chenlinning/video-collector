@@ -30,12 +30,6 @@ interface StreamWriter {
   abort?(reason?: unknown): Promise<unknown>;
 }
 
-interface SaveFilePickerWindow extends Window {
-  showSaveFilePicker?: (options: { suggestedName: string }) => Promise<{
-    createWritable(): Promise<StreamWriter>;
-  }>;
-}
-
 async function requestJSON<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...init,
@@ -188,32 +182,13 @@ export async function saveWebDownload(
   fileName: string,
   onProgress?: (percent: number) => void
 ): Promise<string | null> {
-  const picker = (window as SaveFilePickerWindow).showSaveFilePicker;
   const downloadPath = `/api/v1/tasks/${encodeURIComponent(taskId)}/download`;
-  let writer: StreamWriter | null = null;
-  if (picker) {
-    const handle = await picker({ suggestedName: fileName || "video.mp4" });
-    writer = await handle.createWritable();
-  } else {
-    const anchor = document.createElement("a");
-    anchor.href = downloadPath;
-    anchor.download = fileName || "video.mp4";
-    document.body.append(anchor);
-    anchor.click();
-    anchor.remove();
-    onProgress?.(100);
-    return null;
-  }
-
-  const response = await fetch(downloadPath, {
-    credentials: "same-origin",
-    cache: "no-store"
-  });
-  if (!response.ok) {
-    const payload = await response.json().catch(() => null) as { message?: string } | null;
-    await writer?.abort?.(new Error(payload?.message || "Download failed"));
-    throw new Error(payload?.message || "Download failed");
-  }
-  await streamResponseToWriter(response, writer, onProgress);
-  return response.headers.get("X-Delete-At");
+  const anchor = document.createElement("a");
+  anchor.href = downloadPath;
+  anchor.download = fileName || "video.mp4";
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  onProgress?.(100);
+  return null;
 }
