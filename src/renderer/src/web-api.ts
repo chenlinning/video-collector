@@ -1,27 +1,26 @@
 import type {
+  BatchParseItem,
+  CollectionInfo,
   DownloadProgress,
   DownloadRequest,
   MediaInfo,
   RuntimeStatus,
   StartDownloadResult,
-  VideoCollectorApi
+  VideoCollectorApi,
+  WebTask,
+  WebTaskRequest
 } from "../../shared/contracts";
 
 const activeStates = new Set(["queued", "downloading", "processing"]);
 const httpNoContent = 204;
 
-interface WebTask {
-  id: string;
-  state: "queued" | "downloading" | "processing" | "completed" | "cancelled" | "failed" | "expired";
-  percent: number;
-  speed?: string;
-  eta?: string;
-  downloadedBytes?: number;
-  totalBytes?: number;
-  fileName?: string;
-  fileSize?: number;
-  error?: string;
-  deleteAt?: string;
+export interface WebVideoCollectorApi extends VideoCollectorApi {
+  parseBatch(urls: string[]): Promise<BatchParseItem[]>;
+  parseCollection(url: string): Promise<CollectionInfo>;
+  startTask(request: WebTaskRequest): Promise<WebTask>;
+  uploadTranscription(file: File): Promise<WebTask>;
+  getTask(taskId: string): Promise<WebTask>;
+  refreshTask(taskId: string): Promise<WebTask>;
 }
 
 interface StreamWriter {
@@ -36,7 +35,7 @@ async function requestJSON<T>(path: string, init?: RequestInit): Promise<T> {
     credentials: "same-origin",
     cache: "no-store",
     headers: {
-      ...(init?.body ? { "Content-Type": "application/json" } : {}),
+      ...(typeof init?.body === "string" ? { "Content-Type": "application/json" } : {}),
       ...init?.headers
     }
   });
@@ -44,9 +43,7 @@ async function requestJSON<T>(path: string, init?: RequestInit): Promise<T> {
     const payload = await response.json().catch(() => null) as { message?: string } | null;
     throw new Error(payload?.message || `Request failed with status ${response.status}`);
   }
-  if (response.status === httpNoContent) {
-    return undefined as T;
-  }
+  if (response.status === httpNoContent) return undefined as T;
   return response.json() as Promise<T>;
 }
 
@@ -62,39 +59,69 @@ function taskProgress(task: WebTask): DownloadProgress {
     totalBytes: task.totalBytes,
     outputPath: task.state === "completed" ? task.id : undefined,
     fileName: task.fileName,
+    fileSize: task.fileSize,
+    kind: task.kind,
+    textPreview: task.textPreview,
+    createdAt: task.createdAt,
     deleteAt: task.deleteAt,
     error: task.state === "expired" ? "临时文件已过期" : task.error
   };
 }
 
-export function createWebVideoCollectorApi(): VideoCollectorApi {
+export function createWebVideoCollectorApi(): WebVideoCollectorApi {
   const listeners = new Set<(progress: DownloadProgress) => void>();
-  let pollTimer: ReturnType<typeof setTimeout> | undefined;
+  const pollTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   const emit = (task: WebTask) => {
     const progress = taskProgress(task);
     listeners.forEach((listener) => listener(progress));
   };
+
   const poll = async (taskId: string) => {
     try {
       const task = await requestJSON<WebTask>(`/api/v1/tasks/${encodeURIComponent(taskId)}`);
       emit(task);
       if (activeStates.has(task.state)) {
-        pollTimer = setTimeout(() => void poll(taskId), 1000);
+        pollTimers.set(taskId, setTimeout(() => void poll(taskId), 1000));
+      } else {
+        pollTimers.delete(taskId);
       }
     } catch (error) {
       listeners.forEach((listener) => listener({
         taskId,
         state: "failed",
         percent: 0,
-        error: error instanceof Error ? error.message : "下载状态获取失败"
+        error: error instanceof Error ? error.message : "获取任务状态失败"
       }));
+      pollTimers.delete(taskId);
+    }
+  };
+
+  const startPolling = (task: WebTask) => {
+    emit(task);
+    const existing = pollTimers.get(task.id);
+    if (existing) clearTimeout(existing);
+    if (activeStates.has(task.state)) {
+      pollTimers.set(task.id, setTimeout(() => void poll(task.id), 300));
     }
   };
 
   return {
     parseUrl(url: string): Promise<MediaInfo> {
       return requestJSON<MediaInfo>("/api/v1/media/parse", {
+        method: "POST",
+        body: JSON.stringify({ url })
+      });
+    },
+    async parseBatch(urls: string[]) {
+      const result = await requestJSON<{ items: BatchParseItem[] }>("/api/v1/media/batch", {
+        method: "POST",
+        body: JSON.stringify({ urls })
+      });
+      return result.items;
+    },
+    parseCollection(url: string) {
+      return requestJSON<CollectionInfo>("/api/v1/collections/parse", {
         method: "POST",
         body: JSON.stringify({ url })
       });
@@ -107,7 +134,6 @@ export function createWebVideoCollectorApi(): VideoCollectorApi {
       return { ...status, defaultDownloadDirectory: "浏览器下载目录" };
     },
     async startDownload(request: DownloadRequest): Promise<StartDownloadResult> {
-      if (pollTimer) clearTimeout(pollTimer);
       const task = await requestJSON<WebTask>("/api/v1/tasks", {
         method: "POST",
         body: JSON.stringify({
@@ -115,21 +141,47 @@ export function createWebVideoCollectorApi(): VideoCollectorApi {
           mediaId: request.mediaId,
           title: request.title,
           formatId: request.formatId,
-          hasAudio: request.hasAudio
+          hasAudio: request.hasAudio,
+          kind: request.kind ?? "media",
+          resourceId: request.resourceId,
+          automatic: request.automatic
         })
       });
-      emit(task);
-      pollTimer = setTimeout(() => void poll(task.id), 300);
+      startPolling(task);
       return { taskId: task.id };
     },
+    async startTask(request: WebTaskRequest) {
+      const task = await requestJSON<WebTask>("/api/v1/tasks", {
+        method: "POST",
+        body: JSON.stringify(request)
+      });
+      startPolling(task);
+      return task;
+    },
+    async uploadTranscription(file: File) {
+      const form = new FormData();
+      form.append("file", file);
+      const task = await requestJSON<WebTask>("/api/v1/transcriptions/upload", {
+        method: "POST",
+        body: form
+      });
+      startPolling(task);
+      return task;
+    },
+    getTask(taskId: string) {
+      return requestJSON<WebTask>(`/api/v1/tasks/${encodeURIComponent(taskId)}`);
+    },
+    async refreshTask(taskId: string) {
+      const task = await requestJSON<WebTask>(`/api/v1/tasks/${encodeURIComponent(taskId)}`);
+      emit(task);
+      return task;
+    },
     async cancelDownload(taskId: string) {
-      if (pollTimer) clearTimeout(pollTimer);
+      const timer = pollTimers.get(taskId);
+      if (timer) clearTimeout(timer);
+      pollTimers.delete(taskId);
       await requestJSON<void>(`/api/v1/tasks/${encodeURIComponent(taskId)}`, { method: "DELETE" });
-      listeners.forEach((listener) => listener({
-        taskId,
-        state: "cancelled",
-        percent: 0
-      }));
+      listeners.forEach((listener) => listener({ taskId, state: "cancelled", percent: 0 }));
       return true;
     },
     async listHistory() {
@@ -182,10 +234,9 @@ export async function saveWebDownload(
   fileName: string,
   onProgress?: (percent: number) => void
 ): Promise<string | null> {
-  const downloadPath = `/api/v1/tasks/${encodeURIComponent(taskId)}/download`;
   const anchor = document.createElement("a");
-  anchor.href = downloadPath;
-  anchor.download = fileName || "video.mp4";
+  anchor.href = `/api/v1/tasks/${encodeURIComponent(taskId)}/download`;
+  anchor.download = fileName || "media.bin";
   document.body.append(anchor);
   anchor.click();
   anchor.remove();

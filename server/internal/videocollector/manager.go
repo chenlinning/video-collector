@@ -20,6 +20,7 @@ var (
 	ErrTaskNotReady    = errors.New("video task is not ready for download")
 	ErrTaskQueueFull   = errors.New("video task queue is full")
 	ErrInvalidDownload = errors.New("invalid video download request")
+	ErrMediaTooLong    = errors.New("media duration exceeds the 60 minute limit")
 )
 
 var unsafeFileNameChars = regexp.MustCompile(`[\\/:*?"<>|\x00-\x1f]+`)
@@ -27,6 +28,7 @@ var unsafeFileNameChars = regexp.MustCompile(`[\\/:*?"<>|\x00-\x1f]+`)
 const (
 	DefaultDownloadRetention  = 15 * time.Minute
 	DefaultUnclaimedRetention = 30 * time.Minute
+	MaxUploadBytes            = 250 * 1024 * 1024
 )
 
 type ManagerConfig struct {
@@ -118,10 +120,59 @@ func (m *Manager) Parse(ctx context.Context, sourceURL string) (*MediaInfo, erro
 	}
 }
 
+func (m *Manager) ParseCollection(ctx context.Context, sourceURL string, limit int) (*CollectionInfo, error) {
+	engine, ok := m.engine.(interface {
+		ParseCollection(context.Context, string, int) (*CollectionInfo, error)
+	})
+	if !ok {
+		return nil, ErrInvalidDownload
+	}
+	select {
+	case m.semaphore <- struct{}{}:
+		defer func() { <-m.semaphore }()
+		return engine.ParseCollection(ctx, sourceURL, limit)
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 func (m *Manager) Start(request DownloadRequest) (TaskSnapshot, error) {
-	if strings.TrimSpace(request.SourceURL) == "" || strings.TrimSpace(request.FormatID) == "" {
+	if !validDownloadRequest(&request) {
 		return TaskSnapshot{}, ErrInvalidDownload
 	}
+	return m.startPrepared(request, nil)
+}
+
+func (m *Manager) StartUpload(fileName string, reader io.Reader) (TaskSnapshot, error) {
+	extension := safeUploadExtension(fileName)
+	if extension == "" || reader == nil {
+		return TaskSnapshot{}, ErrInvalidDownload
+	}
+	title := strings.TrimSuffix(filepath.Base(fileName), filepath.Ext(fileName))
+	request := DownloadRequest{Kind: TaskKindTranscript, SourceURL: "upload://local", Title: title}
+	return m.startPrepared(request, func(directory string, prepared *DownloadRequest) error {
+		inputPath := filepath.Join(directory, "input."+extension)
+		output, err := os.OpenFile(inputPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err != nil {
+			return err
+		}
+		written, copyErr := io.Copy(output, io.LimitReader(reader, MaxUploadBytes+1))
+		closeErr := output.Close()
+		if copyErr != nil {
+			return copyErr
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+		if written > MaxUploadBytes {
+			return errors.New("upload exceeds the 250 MiB limit")
+		}
+		prepared.InputPath = inputPath
+		return nil
+	})
+}
+
+func (m *Manager) startPrepared(request DownloadRequest, prepare func(string, *DownloadRequest) error) (TaskSnapshot, error) {
 	taskID, err := randomTaskID()
 	if err != nil {
 		return TaskSnapshot{}, err
@@ -130,6 +181,12 @@ func (m *Manager) Start(request DownloadRequest) (TaskSnapshot, error) {
 	if err := os.Mkdir(directory, 0o700); err != nil {
 		return TaskSnapshot{}, err
 	}
+	if prepare != nil {
+		if err := prepare(directory, &request); err != nil {
+			_ = os.RemoveAll(directory)
+			return TaskSnapshot{}, err
+		}
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), m.taskTimeout)
 	now := m.now()
 	item := &task{
@@ -137,6 +194,7 @@ func (m *Manager) Start(request DownloadRequest) (TaskSnapshot, error) {
 		cancel:  cancel,
 		snapshot: TaskSnapshot{
 			ID:        taskID,
+			Kind:      request.Kind,
 			State:     TaskStateQueued,
 			CreatedAt: now,
 		},
@@ -161,6 +219,37 @@ func (m *Manager) Start(request DownloadRequest) (TaskSnapshot, error) {
 
 	go m.runTask(ctx, item, directory)
 	return initialSnapshot, nil
+}
+
+func safeUploadExtension(fileName string) string {
+	extension := strings.TrimPrefix(strings.ToLower(filepath.Ext(strings.TrimSpace(fileName))), ".")
+	for _, allowed := range []string{"mp3", "m4a", "aac", "wav", "flac", "ogg", "opus", "mp4", "mov", "mkv", "webm"} {
+		if extension == allowed {
+			return extension
+		}
+	}
+	return ""
+}
+
+func validDownloadRequest(request *DownloadRequest) bool {
+	if strings.TrimSpace(request.SourceURL) == "" {
+		return false
+	}
+	if request.Kind == "" {
+		request.Kind = TaskKindMedia
+	}
+	switch request.Kind {
+	case TaskKindMedia:
+		return strings.TrimSpace(request.FormatID) != ""
+	case TaskKindAudio:
+		return true
+	case TaskKindImage, TaskKindSubtitle:
+		return strings.TrimSpace(request.ResourceID) != ""
+	case TaskKindTranscript:
+		return strings.TrimSpace(request.SourceURL) != "" || strings.TrimSpace(request.InputPath) != ""
+	default:
+		return false
+	}
 }
 
 func (m *Manager) Get(taskID string) (TaskSnapshot, error) {
@@ -306,6 +395,10 @@ func (m *Manager) runTask(ctx context.Context, item *task, directory string) {
 		m.finishFailed(item, directory, errors.New("download output file is missing"))
 		return
 	}
+	textPreview := ""
+	if item.request.Kind == TaskKindTranscript {
+		textPreview = readTextPreview(filepath.Join(directory, "output.txt"))
+	}
 
 	m.mu.Lock()
 	current, ok := m.tasks[item.snapshot.ID]
@@ -315,9 +408,23 @@ func (m *Manager) runTask(ctx context.Context, item *task, directory string) {
 		current.snapshot.Percent = 100
 		current.snapshot.FileName = downloadFileName(current.request.Title, result.Extension)
 		current.snapshot.FileSize = fileInfo.Size()
+		current.snapshot.TextPreview = textPreview
 		current.snapshot.CompletedAt = m.now()
 	}
 	m.mu.Unlock()
+}
+
+func readTextPreview(path string) string {
+	file, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+	content, err := io.ReadAll(io.LimitReader(file, 32*1024))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(content))
 }
 
 func (m *Manager) updateProgress(taskID string, update ProgressUpdate) {

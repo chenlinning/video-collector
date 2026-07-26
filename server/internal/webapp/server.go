@@ -17,8 +17,10 @@ import (
 )
 
 type RuntimeStatus struct {
-	YTDLPVersion  string `json:"ytDlpVersion"`
-	FFmpegVersion string `json:"ffmpegVersion"`
+	YTDLPVersion   string `json:"ytDlpVersion"`
+	FFmpegVersion  string `json:"ffmpegVersion"`
+	WhisperVersion string `json:"whisperVersion"`
+	WhisperModel   string `json:"whisperModel"`
 }
 
 type ServerConfig struct {
@@ -81,7 +83,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /health", s.handleHealth)
 	s.mux.HandleFunc("GET /api/v1/status", s.handleStatus)
 	s.mux.HandleFunc("POST /api/v1/media/parse", s.withRateLimit(s.parseLimiter, s.handleParse))
+	s.mux.HandleFunc("POST /api/v1/media/batch", s.withRateLimit(s.parseLimiter, s.handleBatchParse))
+	s.mux.HandleFunc("POST /api/v1/collections/parse", s.withRateLimit(s.parseLimiter, s.handleCollectionParse))
 	s.mux.HandleFunc("POST /api/v1/tasks", s.withRateLimit(s.taskLimiter, s.handleStart))
+	s.mux.HandleFunc("POST /api/v1/transcriptions/upload", s.withRateLimit(s.taskLimiter, s.handleTranscriptionUpload))
 	s.mux.HandleFunc("GET /api/v1/tasks/{id}", s.handleGetTask)
 	s.mux.HandleFunc("DELETE /api/v1/tasks/{id}", s.handleCancelTask)
 	s.mux.HandleFunc("GET /api/v1/tasks/{id}/download", s.handleDownload)
@@ -118,6 +123,7 @@ func (s *Server) withRateLimit(limiter *rateLimiter, next http.HandlerFunc) http
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{
 		"status": "ok", "ytDlpVersion": s.runtime.YTDLPVersion, "ffmpegVersion": s.runtime.FFmpegVersion,
+		"whisperVersion": s.runtime.WhisperVersion, "whisperModel": s.runtime.WhisperModel,
 	})
 }
 
@@ -140,6 +146,57 @@ func (s *Server) handleParse(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, info)
 }
 
+type batchParseItem struct {
+	URL   string                    `json:"url"`
+	Media *videocollector.MediaInfo `json:"media,omitempty"`
+	Error string                    `json:"error,omitempty"`
+}
+
+func (s *Server) handleBatchParse(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		URLs []string `json:"urls"`
+	}
+	if !decodeJSONBody(w, r, &input) {
+		return
+	}
+	if len(input.URLs) == 0 || len(input.URLs) > 10 {
+		writeJSONError(w, http.StatusBadRequest, "batch must contain between 1 and 10 URLs")
+		return
+	}
+	results := make([]batchParseItem, 0, len(input.URLs))
+	for _, rawURL := range input.URLs {
+		item := batchParseItem{URL: strings.TrimSpace(rawURL)}
+		if item.URL == "" {
+			item.Error = "URL is required"
+			results = append(results, item)
+			continue
+		}
+		media, err := s.manager.Parse(r.Context(), item.URL)
+		if err != nil {
+			item.Error = safeError(err)
+		} else {
+			item.Media = media
+		}
+		results = append(results, item)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": results})
+}
+
+func (s *Server) handleCollectionParse(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		URL string `json:"url"`
+	}
+	if !decodeJSONBody(w, r, &input) {
+		return
+	}
+	collection, err := s.manager.ParseCollection(r.Context(), input.URL, 10)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, safeError(err))
+		return
+	}
+	writeJSON(w, http.StatusOK, collection)
+}
+
 func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	var input videocollector.DownloadRequest
 	if !decodeJSONBody(w, r, &input) {
@@ -155,6 +212,44 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusAccepted, task)
+}
+
+func (s *Server) handleTranscriptionUpload(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, videocollector.MaxUploadBytes+1024*1024)
+	reader, err := r.MultipartReader()
+	if err != nil {
+		writeJSONError(w, http.StatusUnsupportedMediaType, "content type must be multipart/form-data")
+		return
+	}
+	part, err := reader.NextPart()
+	if err != nil || part.FormName() != "file" || strings.TrimSpace(part.FileName()) == "" {
+		writeJSONError(w, http.StatusBadRequest, "a media file is required")
+		return
+	}
+	defer part.Close()
+	if !validUploadMediaType(part.Header.Get("Content-Type")) {
+		writeJSONError(w, http.StatusUnsupportedMediaType, "file must be audio or video")
+		return
+	}
+	task, err := s.manager.StartUpload(part.FileName(), part)
+	if err != nil {
+		status := http.StatusBadRequest
+		if errors.Is(err, videocollector.ErrTaskQueueFull) {
+			status = http.StatusTooManyRequests
+		}
+		writeJSONError(w, status, safeError(err))
+		return
+	}
+	writeJSON(w, http.StatusAccepted, task)
+}
+
+func validUploadMediaType(value string) bool {
+	mediaType, _, err := mime.ParseMediaType(value)
+	if err != nil {
+		return false
+	}
+	mediaType = strings.ToLower(strings.TrimSpace(mediaType))
+	return strings.HasPrefix(mediaType, "audio/") || strings.HasPrefix(mediaType, "video/") || mediaType == "application/octet-stream"
 }
 
 func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request) {
@@ -262,7 +357,7 @@ func writeJSONError(w http.ResponseWriter, status int, message string) {
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(value); err != nil {
 		_, _ = io.WriteString(w, fmt.Sprintf(`{"code":%s}`, strconv.Itoa(status)))

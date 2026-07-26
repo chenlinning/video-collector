@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -22,11 +23,13 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	if err := videocollector.EnsureRuntimeFiles(config.ytDLPPath, config.ffmpegPath); err != nil {
+	if err := videocollector.EnsureRuntimeFiles(config.ytDLPPath, config.ffmpegPath, config.whisperPath, config.whisperModelPath); err != nil {
 		log.Fatalf("video collector runtime unavailable: %v", err)
 	}
 
-	engine := videocollector.NewYTDLPEngine(config.ytDLPPath, config.ffmpegPath, nil)
+	engine := videocollector.NewYTDLPEngineWithTranscriber(
+		config.ytDLPPath, config.ffmpegPath, config.whisperPath, config.whisperModelPath, nil,
+	)
 	manager, err := videocollector.NewManager(videocollector.ManagerConfig{
 		Root:               config.tempRoot,
 		DownloadRetention:  videocollector.DefaultDownloadRetention,
@@ -49,8 +52,10 @@ func main() {
 		TaskRateWindow:  time.Hour,
 		TrustProxy:      config.trustProxy,
 		Runtime: webapp.RuntimeStatus{
-			YTDLPVersion:  commandVersion(config.ytDLPPath, "--version"),
-			FFmpegVersion: commandVersion(config.ffmpegPath, "-version"),
+			YTDLPVersion:   commandVersion(config.ytDLPPath, "--version"),
+			FFmpegVersion:  commandVersion(config.ffmpegPath, "-version"),
+			WhisperVersion: config.whisperVersion,
+			WhisperModel:   filepath.Base(config.whisperModelPath),
 		},
 	})
 	if err != nil {
@@ -97,17 +102,20 @@ func main() {
 }
 
 type appConfig struct {
-	listenAddress  string
-	tempRoot       string
-	webRoot        string
-	ytDLPPath      string
-	ffmpegPath     string
-	maxConcurrent  int
-	maxQueued      int
-	parseRateLimit int
-	taskRateLimit  int
-	taskTimeout    time.Duration
-	trustProxy     bool
+	listenAddress    string
+	tempRoot         string
+	webRoot          string
+	ytDLPPath        string
+	ffmpegPath       string
+	whisperPath      string
+	whisperModelPath string
+	whisperVersion   string
+	maxConcurrent    int
+	maxQueued        int
+	parseRateLimit   int
+	taskRateLimit    int
+	taskTimeout      time.Duration
+	trustProxy       bool
 }
 
 func loadConfig() (appConfig, error) {
@@ -127,22 +135,25 @@ func loadConfig() (appConfig, error) {
 	if taskRateLimit < 1 || taskRateLimit > 100 {
 		return appConfig{}, errors.New("VIDEO_COLLECTOR_TASK_RATE_LIMIT must be between 1 and 100")
 	}
-	taskTimeoutSeconds := envInt("VIDEO_COLLECTOR_TASK_TIMEOUT_SECONDS", 1800)
+	taskTimeoutSeconds := envInt("VIDEO_COLLECTOR_TASK_TIMEOUT_SECONDS", 7200)
 	if taskTimeoutSeconds < 60 || taskTimeoutSeconds > 7200 {
 		return appConfig{}, errors.New("VIDEO_COLLECTOR_TASK_TIMEOUT_SECONDS must be between 60 and 7200")
 	}
 	config := appConfig{
-		listenAddress:  envOrDefault("VIDEO_COLLECTOR_LISTEN", "127.0.0.1:8787"),
-		tempRoot:       envOrDefault("VIDEO_COLLECTOR_TEMP_ROOT", "/app/cache/tasks"),
-		webRoot:        envOrDefault("VIDEO_COLLECTOR_WEB_ROOT", "/app/web"),
-		ytDLPPath:      envOrDefault("YTDLP_PATH", "/usr/local/bin/yt-dlp"),
-		ffmpegPath:     envOrDefault("FFMPEG_PATH", "/usr/bin/ffmpeg"),
-		maxConcurrent:  maxConcurrent,
-		maxQueued:      maxQueued,
-		parseRateLimit: parseRateLimit,
-		taskRateLimit:  taskRateLimit,
-		taskTimeout:    time.Duration(taskTimeoutSeconds) * time.Second,
-		trustProxy:     envBool("VIDEO_COLLECTOR_TRUST_PROXY", false),
+		listenAddress:    envOrDefault("VIDEO_COLLECTOR_LISTEN", "127.0.0.1:8787"),
+		tempRoot:         envOrDefault("VIDEO_COLLECTOR_TEMP_ROOT", "/app/cache/tasks"),
+		webRoot:          envOrDefault("VIDEO_COLLECTOR_WEB_ROOT", "/app/web"),
+		ytDLPPath:        envOrDefault("YTDLP_PATH", "/usr/local/bin/yt-dlp"),
+		ffmpegPath:       envOrDefault("FFMPEG_PATH", "/usr/bin/ffmpeg"),
+		whisperPath:      envOrDefault("WHISPER_PATH", "/usr/local/bin/whisper-cli"),
+		whisperModelPath: envOrDefault("WHISPER_MODEL_PATH", "/app/models/ggml-base.bin"),
+		whisperVersion:   envOrDefault("WHISPER_VERSION", "whisper.cpp"),
+		maxConcurrent:    maxConcurrent,
+		maxQueued:        maxQueued,
+		parseRateLimit:   parseRateLimit,
+		taskRateLimit:    taskRateLimit,
+		taskTimeout:      time.Duration(taskTimeoutSeconds) * time.Second,
+		trustProxy:       envBool("VIDEO_COLLECTOR_TRUST_PROXY", false),
 	}
 	return config, nil
 }

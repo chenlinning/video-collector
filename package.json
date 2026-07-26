@@ -16,6 +16,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts && node scripts/integration-test.mjs",
+    "test:acceptance": "node scripts/media-acceptance.mjs",
     "package:win": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-win.ps1"
   },
   "dependencies": {

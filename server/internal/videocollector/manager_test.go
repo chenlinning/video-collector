@@ -1,6 +1,7 @@
 package videocollector
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -18,6 +19,23 @@ func (engineStub) Parse(context.Context, string) (*MediaInfo, error) {
 
 type blockingEngine struct {
 	release chan struct{}
+}
+
+type transcriptEngineStub struct{}
+
+func (transcriptEngineStub) Parse(context.Context, string) (*MediaInfo, error) {
+	return &MediaInfo{ID: "media-1"}, nil
+}
+
+func (transcriptEngineStub) Download(_ context.Context, _ DownloadRequest, outputDir string, _ func(ProgressUpdate)) (*DownloadResult, error) {
+	output := filepath.Join(outputDir, "output.srt")
+	if err := os.WriteFile(output, []byte("1\n00:00:00,000 --> 00:00:01,000\nHello\n"), 0o600); err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(filepath.Join(outputDir, "output.txt"), []byte("Hello from transcription"), 0o600); err != nil {
+		return nil, err
+	}
+	return &DownloadResult{Path: output, Extension: "srt"}, nil
 }
 
 func (engine blockingEngine) Parse(context.Context, string) (*MediaInfo, error) {
@@ -180,4 +198,29 @@ func TestManagerTimesOutLongRunningTasks(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("task did not time out")
+}
+
+func TestManagerAcceptsAllowedTranscriptionUploadAndRejectsUnsafeExtension(t *testing.T) {
+	manager, err := NewManager(ManagerConfig{Root: t.TempDir(), MaxConcurrent: 1}, engineStub{})
+	require.NoError(t, err)
+	defer manager.Close()
+
+	task, err := manager.StartUpload("sample.mp3", bytes.NewBufferString("audio-data"))
+	require.NoError(t, err)
+	completed := waitForCompletedTask(t, manager, task.ID)
+	require.Equal(t, TaskKindTranscript, completed.Kind)
+
+	_, err = manager.StartUpload("payload.html", bytes.NewBufferString("not media"))
+	require.ErrorIs(t, err, ErrInvalidDownload)
+}
+
+func TestManagerReturnsTranscriptTextPreview(t *testing.T) {
+	manager, err := NewManager(ManagerConfig{Root: t.TempDir(), MaxConcurrent: 1}, transcriptEngineStub{})
+	require.NoError(t, err)
+	defer manager.Close()
+
+	task, err := manager.StartUpload("sample.mp3", bytes.NewBufferString("audio-data"))
+	require.NoError(t, err)
+	completed := waitForCompletedTask(t, manager, task.ID)
+	require.Equal(t, "Hello from transcription", completed.TextPreview)
 }

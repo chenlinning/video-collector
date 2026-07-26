@@ -112,4 +112,60 @@ describe("web video collector API", () => {
       state: "cancelled"
     }));
   });
+
+  it("parses batch and public collection inputs through their dedicated endpoints", async () => {
+	const fetchMock = vi.spyOn(globalThis, "fetch")
+	  .mockResolvedValueOnce(new Response(JSON.stringify({ items: [{ url: "https://example.com/one", media: { id: "one" } }] }), { status: 200 }))
+	  .mockResolvedValueOnce(new Response(JSON.stringify({ id: "list", title: "List", sourceUrl: "https://example.com/list", items: [] }), { status: 200 }));
+	const api = createWebVideoCollectorApi();
+
+	await api.parseBatch(["https://example.com/one"]);
+	await api.parseCollection("https://example.com/list");
+
+	expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/v1/media/batch", expect.objectContaining({
+	  method: "POST",
+	  body: JSON.stringify({ urls: ["https://example.com/one"] })
+	}));
+	expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/v1/collections/parse", expect.objectContaining({ method: "POST" }));
+  });
+
+  it("starts image, subtitle, audio, and transcript task kinds without changing retention semantics", async () => {
+	const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+	  id: "task-1", kind: "image", state: "queued", percent: 0, createdAt: "2026-07-26T00:00:00Z"
+	}), { status: 202 }));
+	const api = createWebVideoCollectorApi();
+
+	await api.startTask({
+	  kind: "image",
+	  sourceUrl: "https://example.com/post",
+	  mediaId: "media-1",
+	  title: "Cover",
+	  resourceId: "cover-large"
+	});
+
+	expect(fetchMock).toHaveBeenCalledWith("/api/v1/tasks", expect.objectContaining({
+	  method: "POST",
+	  body: JSON.stringify({
+		kind: "image",
+		sourceUrl: "https://example.com/post",
+		mediaId: "media-1",
+		title: "Cover",
+		resourceId: "cover-large"
+	  })
+	}));
+  });
+
+  it("uploads transcription media as multipart data without forcing a JSON content type", async () => {
+	const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+	  id: "task-upload", kind: "transcript", state: "queued", percent: 0, createdAt: "2026-07-26T00:00:00Z"
+	}), { status: 202 }));
+	const api = createWebVideoCollectorApi();
+	const file = new File(["audio"], "sample.mp3", { type: "audio/mpeg" });
+
+	await api.uploadTranscription(file);
+
+	const [, init] = fetchMock.mock.calls[0];
+	expect(init?.body).toBeInstanceOf(FormData);
+	expect(new Headers(init?.headers).has("Content-Type")).toBe(false);
+  });
 });

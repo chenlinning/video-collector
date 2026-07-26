@@ -18,7 +18,9 @@
 - React/Vite 网站。
 - Go 匿名 HTTP API。
 - yt-dlp 多平台解析和下载。
-- FFmpeg 音视频合并。
+- FFmpeg 音视频合并、MP3 提取和字幕转换。
+- whisper.cpp `base` 多语言模型离线转录 URL 或上传文件。
+- 图片下载、字幕 SRT、公开指标、批量/集合解析和 UTF-8 CSV 导出。
 - 下载进度、取消、Range 下载和文件 TTL。
 - IP 限流、全局并发、有界队列和 URL 安全检查。
 
@@ -36,6 +38,7 @@ video-collector 容器
   ├── 匿名 API
   ├── yt-dlp
   ├── FFmpeg
+  ├── whisper-cli + ggml-base.bin
   └── /app/cache
 ```
 
@@ -61,8 +64,10 @@ video-collector 容器
 | Node 构建镜像 | 22-alpine |
 | yt-dlp | 2026.07.04 |
 | 容器 FFmpeg | 6.1.2 |
+| whisper.cpp | 1.8.6 |
+| Whisper 模型 | `ggml-base.bin`（多语言，官方 SHA-1 已校验） |
 
-生产镜像约 101 MiB，以 UID 100、GID 101 的 `collector` 用户运行。
+当前完整镜像约 240 MB，以 UID 100、GID 101 的 `collector` 用户运行。Whisper 为 CPU 推理；增加转录并发前应先测量 CPU 和内存。
 
 ## 4. 上传项目
 
@@ -113,7 +118,7 @@ VIDEO_COLLECTOR_MAX_CONCURRENT=2
 VIDEO_COLLECTOR_MAX_QUEUED=4
 VIDEO_COLLECTOR_PARSE_RATE_LIMIT=20
 VIDEO_COLLECTOR_TASK_RATE_LIMIT=5
-VIDEO_COLLECTOR_TASK_TIMEOUT_SECONDS=1800
+VIDEO_COLLECTOR_TASK_TIMEOUT_SECONDS=7200
 VIDEO_COLLECTOR_TRUST_PROXY=true
 ```
 
@@ -126,7 +131,7 @@ VIDEO_COLLECTOR_TRUST_PROXY=true
 | `VIDEO_COLLECTOR_MAX_QUEUED` | 4 | 等待任务数量，允许 1–32 |
 | `VIDEO_COLLECTOR_PARSE_RATE_LIMIT` | 20 | 每个 IP 在 15 分钟内的解析次数 |
 | `VIDEO_COLLECTOR_TASK_RATE_LIMIT` | 5 | 每个 IP 在 1 小时内创建任务次数 |
-| `VIDEO_COLLECTOR_TASK_TIMEOUT_SECONDS` | 1800 | 单任务硬超时，允许 60–7200 秒 |
+| `VIDEO_COLLECTOR_TASK_TIMEOUT_SECONDS` | 7200 | 单任务硬超时，允许 60–7200 秒；为最长 60 分钟 CPU 转录预留处理时间 |
 | `VIDEO_COLLECTOR_TRUST_PROXY` | true | 信任唯一前置 Nginx 的真实 IP 请求头 |
 
 匿名版没有必填密钥。`.env` 不应提交到公开仓库。
@@ -186,7 +191,9 @@ curl -fsS http://127.0.0.1:8787/health
 {
   "status": "ok",
   "ytDlpVersion": "2026.07.04",
-  "ffmpegVersion": "ffmpeg version 6.1.2 ..."
+  "ffmpegVersion": "ffmpeg version 6.1.2 ...",
+  "whisperVersion": "whisper.cpp 1.8.6",
+  "whisperModel": "ggml-base.bin"
 }
 ```
 
@@ -216,6 +223,8 @@ sudo systemctl reload nginx
 - 传递 `X-Real-IP`、`X-Forwarded-For` 和 `X-Forwarded-Proto`。
 - 不启用跨域；页面和 API 使用同一域名。
 - 长任务由前端轮询，不需要 WebSocket。
+- `client_max_body_size 251m` 允许 250 MiB 转录文件及 multipart 开销；应用仍执行 250 MiB 硬限制。
+- `proxy_request_buffering off` 将上传直接流式送入项目容器，避免 Nginx 在项目外落地请求体缓存。
 
 ## 9. DNS 与 HTTPS
 
@@ -256,7 +265,10 @@ HTTP 必须跳转到 HTTPS，证书必须覆盖正式域名。
 | GET | `/health` | 健康检查与依赖版本 |
 | GET | `/api/v1/status` | 前端运行状态 |
 | POST | `/api/v1/media/parse` | 解析公开视频 |
-| POST | `/api/v1/tasks` | 创建下载任务 |
+| POST | `/api/v1/media/batch` | 逐条解析 1–10 个 URL |
+| POST | `/api/v1/collections/parse` | 读取公开集合前 10 条 |
+| POST | `/api/v1/tasks` | 创建视频、MP3、图片、字幕或 URL 转录任务 |
+| POST | `/api/v1/transcriptions/upload` | 上传最大 250 MiB 音视频创建转录任务 |
 | GET | `/api/v1/tasks/{id}` | 查询任务 |
 | DELETE | `/api/v1/tasks/{id}` | 取消任务 |
 | GET | `/api/v1/tasks/{id}/download` | 下载完成文件 |
@@ -294,7 +306,7 @@ API 只接受 `application/json`，请求体上限 16 KiB，禁止未知字段�
 - 再次验证下载任务中的源 URL。
 - 限制 URL 长度为 2048。
 - 使用参数数组启动 yt-dlp/FFmpeg，不经过 Shell。
-- 单任务默认 30 分钟硬超时。
+- 单任务默认 2 小时硬超时，转录媒体本身仍限制为 60 分钟。
 - 校验格式 ID，只允许有限字符。
 - 输出目录和文件模板由服务器决定。
 - 规范化下载文件名并检查最终路径仍在任务目录。
@@ -309,13 +321,14 @@ API 只接受 `application/json`，请求体上限 16 KiB，禁止未知字段�
 
 已通过：
 
-- Bilibili：解析、下载、分离音视频合并、FFprobe。
-- AcFun：解析、HLS 下载、FFprobe。
-- TikTok：生产服务器真实下载通过。
+- AcFun：解析、MP4 下载与浏览器领取。
+- SoundCloud：NASA 公开音频的 MP3、图片、URL/文件转录及 10 条集合。
+- TED：公开视频解析和人工字幕 SRT。
+- TikTok：历史生产服务器真实下载通过。
 
 不作为通过项：
 
-- Vimeo、Dailymotion：当前本机网络连接超时。
+- 旧 Vimeo 样本：当前返回 OAuth 401。
 - 西瓜视频样本：平台要求 Cookie。
 
 平台更新可能导致临时失效。升级 yt-dlp 前后都应执行真实回归。
@@ -416,6 +429,7 @@ curl -fsS http://127.0.0.1:8787/health
 |---|---|
 | 容器启动失败 | `docker compose logs`、`cache` UID/GID、8787 占用 |
 | 健康检查失败 | yt-dlp/FFmpeg 是否存在、容器是否只读写入失败 |
+| Whisper 不就绪 | `/app/models/ggml-base.bin`、`whisper-cli`、模型内存和容器 CPU |
 | 页面 502 | 容器状态、Nginx `proxy_pass`、本机 8787 |
 | 页面有界面但不能解析 | 是否部署了完整容器而非单独 `dist-web` |
 | 400 无格式 | 平台是否公开、是否需要登录/Cookie、yt-dlp 是否兼容 |
@@ -440,6 +454,9 @@ curl -fsS http://127.0.0.1:8787/health
 - [ ] Bilibili 生产解析和下载通过。
 - [x] AcFun 生产解析、下载和浏览器原生下载事件通过。
 - [x] TikTok 用户样本在生产服务器出口通过。
+- [ ] SoundCloud MP3、图片、集合和转录在本次生产版本通过。
+- [ ] TED 字幕 SRT 在本次生产版本通过。
+- [ ] 上传文件转录在本次生产版本通过。
 - [ ] 音视频分离格式自动合并。
 - [ ] 取消任务清理部分文件。
 - [ ] IP 限流、并发和队列上限生效。
