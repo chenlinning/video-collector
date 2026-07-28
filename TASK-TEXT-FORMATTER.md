@@ -1,6 +1,6 @@
 # 文本格式化与按行限字分段任务书
 
-> 状态：本地实现与验收已完成，尚未部署生产
+> 状态：已部署生产；核心线上验收通过，本地文件选择器自动化受 Chrome 扩展权限限制
 > 创建日期：2026-07-28
 > 完成日期：2026-07-28
 > 目标：在现有 Video Collector 网站中新增独立的“文本格式化”功能，并记录实现进度与验收结果。
@@ -460,7 +460,7 @@ finish the last non-empty segment
 
 ## 13. 实施进度与验收记录
 
-进度：`100%（本地实现与验收完成）`。本轮没有执行生产部署，因此不能据此把 `https://video-collector.ximoai.cn` 标记为已更新。
+进度：`100%（实现、发布与生产核心验收完成）`。正式站点 `https://video-collector.ximoai.cn` 已运行不可变镜像 `ghcr.io/chenlinning/video-collector:sha-20d2cfe`。
 
 ### 13.1 已实施范围
 
@@ -500,6 +500,11 @@ finish the last non-empty segment
 
 ### 13.4 生产发布状态
 
-- 当前仅完成本地代码、容器和浏览器验收。
-- 未推送镜像，未连接或修改生产服务器 `47.251.87.147`，未变更正式站点。
-- 正式上线后仍需按 `DEPLOYMENT.md` 执行镜像、健康、嵌入、文件导入和回滚验收，并单独记录生产镜像标签。
+- 功能提交：`20d2cfe`；GitHub Actions：`30356002416`；不可变镜像：`ghcr.io/chenlinning/video-collector:sha-20d2cfe`；OCI 摘要：`sha256:b9394c45cff8bb1beda090f438dab72a88c398aa8000def15e2673d7529e16a8`。
+- 2026-07-28 已部署至唯一生产服务器 `47.251.87.147`。部署前镜像为 `sha-c666bcc`；最终 `.env` 备份为 `/opt/video-collector/.env.bak.text-20260728-202446`，旧镜像回滚标签为 `video-collector:rollback-pre-text-20260728-202446`。
+- 保留生产 `docker-compose.yml` 的 CPU、内存、Swap 和 OOM 专用限制，仅修改 `.env` 中的 `VIDEO_COLLECTOR_IMAGE`；没有覆盖生产本地配置，也没有修改主站项目。
+- 生产容器最终为 `running/healthy/0`，`/health` 返回 `status=ok`、`egressStatus=available`；`antiword` 位于 `/usr/bin/antiword`；默认路由与 `wg-quick@wg-vc-egress.service=active` 均保持不变。
+- 首次切换后容器已经健康，但验收命令错误地把 Shell 内建 `command` 直接交给 `docker exec`，自动回滚成功；确认目标镜像实际包含 `antiword` 后修正为 `sh -lc` 并重新发布成功。该过程同时验证了 `.env` 与旧镜像回滚路径可用。
+- 从 `https://ximoai.cn/home` 的“视频收藏”承载页进入后，第六个“文本格式化”入口正常显示。线上样例原文 24 字，经处理得到 19 字、移除 5 个标点、5 行；上限 10 时生成 10 字/3 行和 9 字/2 行两段；15 字单行在上限 10 时保持完整并显示准确超限提示；“复制全部”显示“已复制完整结果”。
+- 无 Cookie 的匿名根页面请求返回 HTTP 403；已从主站取得短期软门禁会话的浏览器可在 TTL 内复用授权 Cookie，这与 `TASK-EMBED-ACCESS-GATE.md` 的设计一致。
+- 生产页面已确认展示 TXT、MD、Markdown、DOCX、DOC 文件入口和 20 MiB 限制；CI、本地浏览器真实 Markdown 导入、服务端各格式提取测试及生产 `antiword` 运行依赖均通过。本次生产浏览器的本地测试文件选择器被 ChatGPT Chrome Extension 的“Allow access to file URLs”权限阻止，因此没有把生产 TXT/Markdown 选择器自动化标记为已执行；这是验收环境限制，不是站点上传错误。

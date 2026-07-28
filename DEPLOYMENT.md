@@ -639,7 +639,7 @@ curl -fsS http://127.0.0.1:8787/health
 
 完成全部检查后，才可把远程部署状态标记为正式上线。
 
-## 20. 文本格式化功能本地验收（2026-07-28）
+## 20. 文本格式化功能发布验收（2026-07-28）
 
 - [x] 文本输入、TXT/Markdown/DOCX/DOC 导入、标点转换、复制、完整 TXT 导出和按行限字分段已实现。
 - [x] 前端 66 项测试、TypeScript 类型检查、Web/Electron 构建通过。
@@ -648,6 +648,11 @@ curl -fsS http://127.0.0.1:8787/health
 - [x] Apache POI `simple.doc` 实样经 HTTP 提取后，与容器内 antiword 输出逐 UTF-8 字节一致。
 - [x] 浏览器完成 FT-01、FT-03、FT-04、真实 Markdown 导入、失败保留原文、空结果阻断与复制验收。
 - [x] 390px 深色/浅色均无横向溢出，既有媒体工具和嵌入协议自动化回归通过。
-- [ ] 尚未把包含本功能的镜像推送或部署到生产服务器 `47.251.87.147`。
+- [x] 功能提交 `20d2cfe` 已通过 GitHub Actions `30356002416`，并发布为 `ghcr.io/chenlinning/video-collector:sha-20d2cfe`（OCI `sha256:b9394c45cff8bb1beda090f438dab72a88c398aa8000def15e2673d7529e16a8`）。
+- [x] 已部署到生产服务器 `47.251.87.147`；部署前镜像 `sha-c666bcc`，最终 `.env` 备份 `/opt/video-collector/.env.bak.text-20260728-202446`，回滚标签 `video-collector:rollback-pre-text-20260728-202446`。
+- [x] 生产容器为 `running/healthy/0`，健康接口为 `status=ok`、`egressStatus=available`，`antiword=/usr/bin/antiword`；默认路由、WireGuard 和生产专用 Compose 资源限制未改变。
+- [x] 从主站“视频收藏”承载页进入后显示第六个“文本格式化”入口；线上完成标点移除、原换行归一化、10 字按行分段、超限整行保护和复制状态验收。
+- [x] 无 Cookie 匿名请求正式域名根页面返回 403；合法主站会话在 TTL 内复用授权 Cookie，符合软门禁设计。
+- [ ] 生产页面的 TXT/Markdown 本地文件选择器自动化未执行：ChatGPT Chrome Extension 未启用 “Allow access to file URLs”。CI、本地真实文件导入、服务端各格式提取测试及生产运行依赖均已通过；启用该浏览器权限后可补做此项，不阻塞已验证的生产核心功能。
 
-完整需求、实现范围、样本哈希和本地验收明细见 `TASK-TEXT-FORMATTER.md` 第 13 节。生产发布时必须另行记录不可变镜像标签、部署前回滚点、正式站点文件导入和主站嵌入结果。
+完整需求、实现范围、样本哈希、本地验收和生产验收明细见 `TASK-TEXT-FORMATTER.md` 第 13 节。
