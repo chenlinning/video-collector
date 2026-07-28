@@ -655,4 +655,13 @@ curl -fsS http://127.0.0.1:8787/health
 - [x] 无 Cookie 匿名请求正式域名根页面返回 403；合法主站会话在 TTL 内复用授权 Cookie，符合软门禁设计。
 - [ ] 生产页面的 TXT/Markdown 本地文件选择器自动化未执行：ChatGPT Chrome Extension 未启用 “Allow access to file URLs”。CI、本地真实文件导入、服务端各格式提取测试及生产运行依赖均已通过；启用该浏览器权限后可补做此项，不阻塞已验证的生产核心功能。
 
+## 21. 紧凑工具栏与分段选择复制增强发布验收（2026-07-28）
+
+- [x] 功能提交 `ff39ec1` 已通过 GitHub Actions `30364654192`，并发布为 `ghcr.io/chenlinning/video-collector:sha-ff39ec1`（OCI `sha256:f81feab035f78b3acfa4e2bab634b9b968880a6becb79852db7f2b3063e7f151`）。
+- [x] 已部署到生产服务器 `47.251.87.147`；部署前镜像为 `sha-20d2cfe`，`.env` 备份为 `/opt/video-collector/.env.bak.segment-ui-20260728-214727`，回滚标签为 `video-collector:rollback-pre-segment-ui-20260728-214727`。
+- [x] 生产容器为 `running/healthy/0`，健康接口为 `status=ok`、`egressStatus=available`，默认路由、WireGuard 服务和 `antiword` 运行依赖未改变。
+- [x] 正式站点桌面端 6 个工具入口同一行且高度均为 56px；390px 视口下为 2 列、3 行，`scrollWidth === clientWidth === 375`，无横向溢出。
+- [x] 分段菜单默认选择第 1 段并显示全部分段摘要；切换第 2 段后，“复制分段”只复制第 2 段正文并显示对应成功提示。
+- [x] 未修改主站项目；线上交互验收使用主站承载页建立的短期授权会话。
+
 完整需求、实现范围、样本哈希、本地验收和生产验收明细见 `TASK-TEXT-FORMATTER.md` 第 13 节。

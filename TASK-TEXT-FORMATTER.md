@@ -1,6 +1,6 @@
 # 文本格式化与按行限字分段任务书
 
-> 状态：核心功能已部署生产；紧凑工具栏与分段选择复制增强已完成本地验收，尚未部署
+> 状态：核心功能、紧凑工具栏与分段选择复制增强均已部署生产并通过线上验收
 > 创建日期：2026-07-28
 > 完成日期：2026-07-28
 > 目标：在现有 Video Collector 网站中新增独立的“文本格式化”功能，并记录实现进度与验收结果。
@@ -460,7 +460,7 @@ finish the last non-empty segment
 
 ## 13. 实施进度与验收记录
 
-进度：核心功能 `100%（实现、发布与生产核心验收完成）`；本次界面增强 `100%（本地实现与验收完成，尚未部署）`。正式站点 `https://video-collector.ximoai.cn` 仍运行不可变镜像 `ghcr.io/chenlinning/video-collector:sha-20d2cfe`。
+进度：核心功能与本次界面增强均为 `100%（实现、发布与生产验收完成）`。正式站点 `https://video-collector.ximoai.cn` 已运行不可变镜像 `ghcr.io/chenlinning/video-collector:sha-ff39ec1`。
 
 ### 13.1 已实施范围
 
@@ -517,4 +517,9 @@ finish the last non-empty segment
 - 修改原文、重新格式化、清空、调整字数上限或分段失败时会清空旧分段选择，避免复制过期结果；中英文文案同步完成。
 - 390px 视口实测 `scrollWidth === clientWidth === 375`，分段控件和下拉菜单均为 319px，无横向溢出；900px 中等桌面宽度下分段控件自然换行且无溢出。
 - `npm test -- --run`：13 个测试文件、69 项测试全部通过；`npm run typecheck`、`npm run build:web` 和 `git diff --check` 通过。
-- 本节记录的是本地增强验收，未修改主站、未提交、未推送，也未部署生产。
+- 功能提交：`ff39ec1`；GitHub Actions：`30364654192`；不可变镜像：`ghcr.io/chenlinning/video-collector:sha-ff39ec1`；OCI 摘要：`sha256:f81feab035f78b3acfa4e2bab634b9b968880a6becb79852db7f2b3063e7f151`。
+- 已部署到唯一生产服务器 `47.251.87.147`；部署前镜像为 `sha-20d2cfe`，`.env` 备份为 `/opt/video-collector/.env.bak.segment-ui-20260728-214727`，回滚标签为 `video-collector:rollback-pre-segment-ui-20260728-214727`。
+- 生产容器最终为 `running/healthy/0`，健康接口仍为 `status=ok`、`egressStatus=available`，`antiword=/usr/bin/antiword`；默认路由与 `wg-quick@wg-vc-egress.service=active` 保持不变。
+- 正式站点桌面布局实测 6 个工具入口处于同一行且高度均为 56px；390px 视口下 `scrollWidth === clientWidth === 375`，工具栏为 2 列、3 行，分段菜单宽 319px，无横向溢出。
+- 正式站点生成两段后默认选择第 1 段，菜单显示“第 1 段 · 5 字 · 2 行”和“第 2 段 · 3 字 · 1 行”；切换到第 2 段后，“复制分段”只写入 `丙丙丙`，并显示“第 2 段已复制”。
+- 本次增强未修改主站项目；生产验收通过主站承载页建立的短期授权会话完成。
