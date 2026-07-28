@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/chenlinning/video-collector/server/internal/textformatter"
 	"github.com/chenlinning/video-collector/server/internal/videocollector"
 	"github.com/chenlinning/video-collector/server/internal/webapp"
 )
@@ -26,6 +27,9 @@ func main() {
 	}
 	if err := videocollector.EnsureRuntimeFiles(config.ytDLPPath, config.ffmpegPath, config.whisperPath, config.whisperModelPath); err != nil {
 		log.Fatalf("video collector runtime unavailable: %v", err)
+	}
+	if _, err := exec.LookPath(config.antiwordPath); err != nil {
+		log.Fatalf("text document runtime unavailable: %v", err)
 	}
 	egress, err := videocollector.NewEgressRouter(config.egress)
 	if err != nil {
@@ -60,6 +64,10 @@ func main() {
 		EmbedMode:           config.embedMode,
 		EmbedAllowedOrigins: config.embedAllowedOrigins,
 		EmbedSessionTTL:     config.embedSessionTTL,
+		TextExtractor: textformatter.NewExtractor(textformatter.Config{
+			AntiwordPath: config.antiwordPath,
+			TempDir:      os.TempDir(),
+		}),
 		Runtime: webapp.RuntimeStatus{
 			YTDLPVersion:   commandVersion(config.ytDLPPath, "--version"),
 			FFmpegVersion:  commandVersion(config.ffmpegPath, "-version"),
@@ -119,6 +127,7 @@ type appConfig struct {
 	whisperPath         string
 	whisperModelPath    string
 	whisperVersion      string
+	antiwordPath        string
 	maxConcurrent       int
 	maxQueued           int
 	parseRateLimit      int
@@ -169,6 +178,7 @@ func loadConfig() (appConfig, error) {
 		whisperPath:         envOrDefault("WHISPER_PATH", "/usr/local/bin/whisper-cli"),
 		whisperModelPath:    envOrDefault("WHISPER_MODEL_PATH", "/app/models/ggml-base.bin"),
 		whisperVersion:      envOrDefault("WHISPER_VERSION", "whisper.cpp"),
+		antiwordPath:        envOrDefault("ANTIWORD_PATH", "/usr/bin/antiword"),
 		maxConcurrent:       maxConcurrent,
 		maxQueued:           maxQueued,
 		parseRateLimit:      parseRateLimit,

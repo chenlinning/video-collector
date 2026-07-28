@@ -638,3 +638,16 @@ curl -fsS http://127.0.0.1:8787/health
 - 生产“开始解析”按钮实测为 `#5a8b67`、白字、14px/500、12px 圆角、系统 UI 字体栈和主站轻阴影。
 
 完成全部检查后，才可把远程部署状态标记为正式上线。
+
+## 20. 文本格式化功能本地验收（2026-07-28）
+
+- [x] 文本输入、TXT/Markdown/DOCX/DOC 导入、标点转换、复制、完整 TXT 导出和按行限字分段已实现。
+- [x] 前端 66 项测试、TypeScript 类型检查、Web/Electron 构建通过。
+- [x] `go test ./server/...`、`go vet ./server/...` 和 Compose 配置展开通过。
+- [x] 最终本地镜像 `video-collector:text-formatter-final`（ID `sha256:5b8ac2c78b77a92ce3b0dcff6f11975ae0026a9197c59e82396f4b5ec8a17e3f`）构建成功，健康接口正常，`antiword` 可执行。
+- [x] Apache POI `simple.doc` 实样经 HTTP 提取后，与容器内 antiword 输出逐 UTF-8 字节一致。
+- [x] 浏览器完成 FT-01、FT-03、FT-04、真实 Markdown 导入、失败保留原文、空结果阻断与复制验收。
+- [x] 390px 深色/浅色均无横向溢出，既有媒体工具和嵌入协议自动化回归通过。
+- [ ] 尚未把包含本功能的镜像推送或部署到生产服务器 `47.251.87.147`。
+
+完整需求、实现范围、样本哈希和本地验收明细见 `TASK-TEXT-FORMATTER.md` 第 13 节。生产发布时必须另行记录不可变镜像标签、部署前回滚点、正式站点文件导入和主站嵌入结果。

@@ -321,6 +321,53 @@ func TestServerAcceptsAnonymousTranscriptionUpload(t *testing.T) {
 	require.NotContains(t, response.Header().Get("Set-Cookie"), "session")
 }
 
+func TestServerExtractsTextDocumentInMemory(t *testing.T) {
+	manager, err := videocollector.NewManager(videocollector.ManagerConfig{Root: t.TempDir(), MaxConcurrent: 1}, serverEngineStub{})
+	require.NoError(t, err)
+	webRoot := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(webRoot, "index.html"), []byte("<html>collector</html>"), 0o600))
+	handler, err := NewServer(ServerConfig{Manager: manager, WebRoot: webRoot})
+	require.NoError(t, err)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "article.txt")
+	require.NoError(t, err)
+	_, err = part.Write([]byte("第一行，第二行！！！"))
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/text/extract", &body)
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	require.Equal(t, http.StatusOK, response.Code)
+	require.JSONEq(t, `{"fileName":"article.txt","format":"txt","text":"第一行，第二行！！！","byteSize":30,"characterCount":10}`, response.Body.String())
+}
+
+func TestServerRejectsOversizedTextDocumentWithPayloadTooLarge(t *testing.T) {
+	manager, err := videocollector.NewManager(videocollector.ManagerConfig{Root: t.TempDir(), MaxConcurrent: 1}, serverEngineStub{})
+	require.NoError(t, err)
+	webRoot := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(webRoot, "index.html"), []byte("<html>collector</html>"), 0o600))
+	handler, err := NewServer(ServerConfig{Manager: manager, WebRoot: webRoot})
+	require.NoError(t, err)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "oversized.txt")
+	require.NoError(t, err)
+	_, err = part.Write(bytes.Repeat([]byte{'a'}, int(MaxTextDocumentBytes+2<<20)))
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/text/extract", &body)
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	require.Equal(t, http.StatusRequestEntityTooLarge, response.Code)
+}
+
 func TestServerRejectsTranscriptionUploadWithNonMediaMIME(t *testing.T) {
 	manager, err := videocollector.NewManager(videocollector.ManagerConfig{Root: t.TempDir(), MaxConcurrent: 1}, serverEngineStub{})
 	require.NoError(t, err)

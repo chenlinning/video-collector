@@ -16,5 +16,7 @@ describe("renderer localization", () => {
     expect(uiCopy["zh-CN"].retentionNotice).toContain("15 分钟");
     expect(uiCopy.en.retentionNotice).toContain("30 minutes");
     expect(uiCopy.en.retentionNotice).toContain("15 minutes");
+    expect(uiCopy["zh-CN"].tools.text).toBe("文本格式化");
+    expect(uiCopy.en.toolHints.text).toContain("Punctuation");
   });
 });

@@ -20,14 +20,15 @@ export const uiCopy = {
     titleEmphasis: "媒体收藏。",
     webDescription: "解析你有权保存的公开内容，并按需获取视频、MP3、图片、字幕或离线转录。",
     toolNavigation: "媒体工具",
-    tools: { media: "视频", audio: "音频", image: "图片", subtitle: "字幕", transcript: "AI 转录" },
-    toolHints: { media: "多画质", audio: "提取 MP3", image: "封面与图集", subtitle: "导出 SRT", transcript: "URL 或文件" },
+    tools: { media: "视频", audio: "音频", image: "图片", subtitle: "字幕", transcript: "AI 转录", text: "文本格式化" },
+    toolHints: { media: "多画质", audio: "提取 MP3", image: "封面与图集", subtitle: "导出 SRT", transcript: "URL 或文件", text: "移除标点与分段" },
     toolDescriptions: {
       media: "选择源站真实提供的画质；无音轨视频会自动合并最佳公开音轨。",
       audio: "从公开媒体中提取最佳音轨，并由 FFmpeg 转换为 MP3。",
       image: "查看解析器返回的封面与图片候选，选择单张下载。",
       subtitle: "查看人工与自动字幕语言，并统一导出为 SRT。",
-      transcript: "使用服务器内的离线 Whisper 模型，将公开 URL 或本地音视频转录为 SRT。"
+      transcript: "使用服务器内的离线 Whisper 模型，将公开 URL 或本地音视频转录为 SRT。",
+      text: "完整提取文章文字，移除标点并整理换行，再按完整行和最大字数分段导出。"
     },
     modes: { single: "单条链接", batch: "批量链接", collection: "创作者 / 播放列表", file: "上传文件" },
     missingUrl: "请先输入公开媒体链接",
@@ -100,14 +101,15 @@ export const uiCopy = {
     titleEmphasis: "all in one place.",
     webDescription: "Process public media you are authorized to save, then get video, MP3, images, subtitles, or an offline transcription.",
     toolNavigation: "Media tools",
-    tools: { media: "Video", audio: "Audio", image: "Images", subtitle: "Subtitles", transcript: "AI transcript" },
-    toolHints: { media: "Quality picker", audio: "Extract MP3", image: "Covers & galleries", subtitle: "Export SRT", transcript: "URL or file" },
+    tools: { media: "Video", audio: "Audio", image: "Images", subtitle: "Subtitles", transcript: "AI transcript", text: "Text formatter" },
+    toolHints: { media: "Quality picker", audio: "Extract MP3", image: "Covers & galleries", subtitle: "Export SRT", transcript: "URL or file", text: "Punctuation & segments" },
     toolDescriptions: {
       media: "Choose a quality actually offered by the source; video-only formats are merged with the best public audio track.",
       audio: "Extract the best public audio track and convert it to MP3 with FFmpeg.",
       image: "Inspect cover and image candidates returned by the extractor, then download one image.",
       subtitle: "Choose manual or automatic subtitle languages and export a normalized SRT file.",
-      transcript: "Use the server's offline Whisper model to transcribe a public URL or your local media file to SRT."
+      transcript: "Use the server's offline Whisper model to transcribe a public URL or your local media file to SRT.",
+      text: "Extract complete article text, replace punctuation with normalized line breaks, then export line-safe character-limited segments."
     },
     modes: { single: "Single URL", batch: "Batch URLs", collection: "Creator / playlist", file: "Upload file" },
     missingUrl: "Enter a public media URL first",

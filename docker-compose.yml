@@ -16,6 +16,7 @@ services:
       TMPDIR: /app/cache/tmp
       WHISPER_PATH: /usr/local/bin/whisper-cli
       WHISPER_MODEL_PATH: /app/models/ggml-base.bin
+      ANTIWORD_PATH: /usr/bin/antiword
       VIDEO_COLLECTOR_MAX_CONCURRENT: ${VIDEO_COLLECTOR_MAX_CONCURRENT:-2}
       VIDEO_COLLECTOR_MAX_QUEUED: ${VIDEO_COLLECTOR_MAX_QUEUED:-4}
       VIDEO_COLLECTOR_PARSE_RATE_LIMIT: ${VIDEO_COLLECTOR_PARSE_RATE_LIMIT:-20}

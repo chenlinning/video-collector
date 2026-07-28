@@ -232,11 +232,67 @@ button { color: inherit; }
 .legal-card strong { font-size: 10px; }
 .legal-card p { margin: 0; color: var(--muted-foreground); font-size: 9px; line-height: 1.55; }
 
+.text-formatter-shell { min-width: 0; display: grid; gap: 16px; }
+.text-formatter-hero, .text-panel, .text-segment-panel { border: 1px solid var(--card-border); border-radius: 16px; background: var(--card); box-shadow: var(--shadow-card); }
+.text-formatter-hero { padding: 21px 24px; display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.text-formatter-hero > div:first-child { min-width: 0; }
+.text-formatter-hero > div:first-child > span { color: var(--brand-soft); font-size: 9px; font-weight: 800; letter-spacing: 1.6px; }
+.text-formatter-hero h2 { margin: 7px 0 5px; font-size: 22px; letter-spacing: -.5px; }
+.text-formatter-hero p { max-width: 720px; margin: 0; color: var(--muted-foreground); font-size: 11px; line-height: 1.6; }
+.text-local-badge { max-width: 280px; padding: 10px 12px; display: flex; align-items: center; gap: 8px; border: 1px solid color-mix(in srgb, var(--primary) 25%, var(--border)); border-radius: 12px; color: var(--muted-foreground); background: color-mix(in srgb, var(--primary) 7%, var(--card)); font-size: 9px; line-height: 1.45; }
+.text-formatter-grid { min-width: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.text-panel { min-width: 0; padding: 20px; }
+.text-panel-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.text-panel-heading > div:first-child { min-width: 0; display: flex; align-items: flex-start; gap: 9px; }
+.text-panel-heading h3 { margin: 0; font-size: 14px; }
+.text-panel-heading p { max-width: 540px; margin: 4px 0 0; color: var(--muted-foreground); font-size: 9px; line-height: 1.5; }
+.text-heading-actions { flex: none; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+.text-file-info { margin-top: 14px; padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid color-mix(in srgb, var(--primary) 23%, var(--border)); border-radius: 10px; background: color-mix(in srgb, var(--primary) 6%, var(--card)); font-size: 9px; }
+.text-file-info strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.text-file-info span { flex: none; color: var(--muted-foreground); }
+.text-file-info.failed { border-color: color-mix(in srgb, var(--destructive) 35%, var(--border)); }
+.text-file-info.failed span { color: var(--destructive); }
+.text-source-input, .text-result-output { width: 100%; min-height: 330px; margin-top: 14px; padding: 15px 16px; border: 1px solid var(--input); border-radius: 12px; outline: none; background: var(--card-subtle); color: var(--foreground); font: 12px/1.7 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; resize: vertical; transition: border-color .2s ease, box-shadow .2s ease; }
+.text-source-input:focus { border-color: var(--ring); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 15%, transparent); }
+.text-source-input::placeholder { color: color-mix(in srgb, var(--muted-foreground) 70%, transparent); }
+.text-result-output { min-height: 284px; }
+.text-input-footer { min-height: 26px; padding: 7px 2px 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--muted-foreground); font-size: 8px; }
+.text-input-footer strong { color: var(--brand-soft); font-size: 10px; }
+.text-primary-action { width: 100%; margin-top: 11px; }
+.text-result-empty { min-height: 356px; margin-top: 14px; padding: 24px; display: grid; place-items: center; border: 1px dashed var(--border); border-radius: 12px; color: var(--muted-foreground); background: var(--card-subtle); font-size: 10px; text-align: center; }
+.text-stats { margin-top: 14px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; }
+.text-stats > div { min-width: 0; padding: 9px 10px; display: grid; gap: 3px; border: 1px solid var(--border); border-radius: 9px; background: var(--card-subtle); }
+.text-stats span { overflow: hidden; color: var(--muted-foreground); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.text-stats strong { font-size: 11px; }
+.text-notice { padding: 12px 14px; border-radius: 12px; font-size: 10px; line-height: 1.5; }
+.text-notice.success { border: 1px solid color-mix(in srgb, var(--primary) 34%, var(--border)); color: var(--brand-soft); background: color-mix(in srgb, var(--primary) 8%, var(--card)); }
+.text-notice.error { border: 1px solid color-mix(in srgb, var(--destructive) 35%, var(--border)); color: var(--destructive); background: color-mix(in srgb, var(--destructive) 8%, var(--card)); }
+.text-segment-panel { padding: 20px; }
+.segment-controls { flex: none; display: flex; align-items: flex-end; justify-content: flex-end; gap: 8px; }
+.segment-controls label { display: grid; gap: 5px; color: var(--muted-foreground); font-size: 8px; }
+.segment-controls input { width: 150px; height: 38px; padding: 0 11px; border: 1px solid var(--input); border-radius: 10px; outline: none; background: var(--card-subtle); color: var(--foreground); }
+.segment-controls input:focus { border-color: var(--ring); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 15%, transparent); }
+.segment-controls .primary-button { min-width: 112px; min-height: 38px; }
+.segment-issues { margin-top: 14px; padding: 11px 13px; border: 1px solid color-mix(in srgb, var(--destructive) 35%, var(--border)); border-radius: 11px; color: var(--destructive); background: color-mix(in srgb, var(--destructive) 8%, var(--card)); }
+.segment-issues p { margin: 0; font-size: 9px; line-height: 1.55; }
+.segment-issues p + p { margin-top: 5px; }
+.segment-list { margin-top: 16px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; }
+.segment-card { min-width: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 12px; background: var(--card-subtle); }
+.segment-card header { padding: 10px 11px; display: flex; align-items: center; justify-content: space-between; gap: 10px; border-bottom: 1px solid var(--border); background: var(--card); }
+.segment-card header > div:first-child { min-width: 0; display: grid; gap: 3px; }
+.segment-card header strong { font-size: 10px; }
+.segment-card header span { color: var(--muted-foreground); font-size: 8px; }
+.segment-card header > div:last-child { flex: none; display: flex; gap: 5px; }
+.segment-card header button { padding: 5px 7px; border: 1px solid var(--input); border-radius: 7px; color: var(--foreground); background: var(--card-subtle); cursor: pointer; font-size: 8px; }
+.segment-card header button:hover { border-color: var(--primary); color: var(--brand-soft); }
+.segment-card pre { min-height: 120px; max-height: 240px; margin: 0; padding: 12px; overflow: auto; color: var(--foreground); font: 10px/1.65 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+
 @media (max-width: 1040px) {
   .main-grid { grid-template-columns: 1fr; }
   .sidebar { grid-template-columns: minmax(0, 1.4fr) minmax(260px, .8fr); }
   .legal-card { grid-column: 1 / -1; }
   .task-list { max-height: 420px; }
+  .text-formatter-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 800px) {
@@ -244,6 +300,10 @@ button { color: inherit; }
   .hero-card { grid-template-columns: 1fr; align-items: start; }
   .tool-tabs { grid-template-columns: repeat(3, 1fr); }
   .image-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .text-formatter-hero, .text-panel-heading { align-items: stretch; flex-direction: column; }
+  .text-local-badge { max-width: none; }
+  .text-heading-actions, .segment-controls { justify-content: flex-start; }
+  .segment-controls { flex-wrap: wrap; }
 }
 
 @media (max-width: 560px) {
@@ -264,6 +324,16 @@ button { color: inherit; }
   .legal-card { grid-column: auto; }
   .results-heading { align-items: flex-start; }
   .results-heading .secondary-button { flex: 0 0 auto; }
+  .text-formatter-hero, .text-panel, .text-segment-panel { padding: 17px; }
+  .text-heading-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .text-heading-actions .secondary-button { width: 100%; }
+  .text-source-input, .text-result-output { min-height: 260px; font-size: 11px; }
+  .text-result-empty { min-height: 300px; }
+  .text-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .segment-controls { display: grid; grid-template-columns: 1fr; }
+  .segment-controls label, .segment-controls input, .segment-controls .primary-button, .segment-controls .secondary-button { width: 100%; }
+  .segment-list { grid-template-columns: 1fr; }
+  .segment-card header { align-items: flex-start; flex-direction: column; }
 }
 
 @media (max-width: 390px) {

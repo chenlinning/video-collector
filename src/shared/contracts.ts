@@ -157,6 +157,14 @@ export interface RuntimeStatus {
   whisperModel?: string;
 }
 
+export interface ExtractedTextDocument {
+  fileName: string;
+  format: "txt" | "md" | "markdown" | "docx" | "doc";
+  text: string;
+  byteSize: number;
+  characterCount: number;
+}
+
 export interface StartDownloadResult {
   taskId: string;
 }

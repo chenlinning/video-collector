@@ -18,8 +18,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chenlinning/video-collector/server/internal/textformatter"
 	"github.com/chenlinning/video-collector/server/internal/videocollector"
 )
+
+const MaxTextDocumentBytes int64 = 20 << 20
 
 type RuntimeStatus struct {
 	YTDLPVersion   string `json:"ytDlpVersion"`
@@ -49,6 +52,7 @@ type ServerConfig struct {
 	EmbedMode           string
 	EmbedAllowedOrigins []string
 	EmbedSessionTTL     time.Duration
+	TextExtractor       *textformatter.Extractor
 }
 
 type Server struct {
@@ -66,6 +70,7 @@ type Server struct {
 	now           func() time.Time
 	embedMu       sync.Mutex
 	embedSessions map[string]time.Time
+	textExtractor *textformatter.Extractor
 }
 
 func NewServer(config ServerConfig) (*Server, error) {
@@ -86,6 +91,9 @@ func NewServer(config ServerConfig) (*Server, error) {
 	}
 	if config.EgressStatus == nil {
 		config.EgressStatus = func() string { return "off" }
+	}
+	if config.TextExtractor == nil {
+		config.TextExtractor = textformatter.NewExtractor(textformatter.Config{})
 	}
 	if config.EmbedMode == "" {
 		config.EmbedMode = EmbedModeOff
@@ -123,6 +131,7 @@ func NewServer(config ServerConfig) (*Server, error) {
 		mux:          http.NewServeMux(), embedMode: config.EmbedMode,
 		embedOrigins: embedOrigins, embedTTL: config.EmbedSessionTTL, now: now,
 		embedSessions: make(map[string]time.Time),
+		textExtractor: config.TextExtractor,
 	}
 	server.routes()
 	return server, nil
@@ -136,6 +145,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/collections/parse", s.withRateLimit(s.parseLimiter, s.handleCollectionParse))
 	s.mux.HandleFunc("POST /api/v1/tasks", s.withRateLimit(s.taskLimiter, s.handleStart))
 	s.mux.HandleFunc("POST /api/v1/transcriptions/upload", s.withRateLimit(s.taskLimiter, s.handleTranscriptionUpload))
+	s.mux.HandleFunc("POST /api/v1/text/extract", s.withRateLimit(s.taskLimiter, s.handleTextExtract))
 	s.mux.HandleFunc("GET /api/v1/tasks/{id}", s.handleGetTask)
 	s.mux.HandleFunc("DELETE /api/v1/tasks/{id}", s.handleCancelTask)
 	s.mux.HandleFunc("GET /api/v1/tasks/{id}/download", s.handleDownload)
@@ -409,6 +419,36 @@ func (s *Server) handleTranscriptionUpload(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	writeJSON(w, http.StatusAccepted, task)
+}
+
+func (s *Server) handleTextExtract(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, MaxTextDocumentBytes+1024*1024)
+	reader, err := r.MultipartReader()
+	if err != nil {
+		writeJSONError(w, http.StatusUnsupportedMediaType, "content type must be multipart/form-data")
+		return
+	}
+	part, err := reader.NextPart()
+	if err != nil || part.FormName() != "file" || strings.TrimSpace(part.FileName()) == "" {
+		writeJSONError(w, http.StatusBadRequest, "a text document is required")
+		return
+	}
+	defer part.Close()
+	data, err := io.ReadAll(io.LimitReader(part, MaxTextDocumentBytes+1))
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "text document cannot be read")
+		return
+	}
+	if int64(len(data)) > MaxTextDocumentBytes {
+		writeJSONError(w, http.StatusRequestEntityTooLarge, "text document exceeds the 20 MiB limit")
+		return
+	}
+	document, err := s.textExtractor.Extract(r.Context(), part.FileName(), part.Header.Get("Content-Type"), data)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, safeError(err))
+		return
+	}
+	writeJSON(w, http.StatusOK, document)
 }
 
 func validUploadMediaType(value string) bool {

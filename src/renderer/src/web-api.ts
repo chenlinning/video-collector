@@ -3,6 +3,7 @@ import type {
   CollectionInfo,
   DownloadProgress,
   DownloadRequest,
+  ExtractedTextDocument,
   MediaInfo,
   RuntimeStatus,
   StartDownloadResult,
@@ -19,6 +20,7 @@ export interface WebVideoCollectorApi extends VideoCollectorApi {
   parseCollection(url: string): Promise<CollectionInfo>;
   startTask(request: WebTaskRequest): Promise<WebTask>;
   uploadTranscription(file: File): Promise<WebTask>;
+  extractTextDocument(file: File): Promise<ExtractedTextDocument>;
   getTask(taskId: string): Promise<WebTask>;
   refreshTask(taskId: string): Promise<WebTask>;
 }
@@ -167,6 +169,14 @@ export function createWebVideoCollectorApi(): WebVideoCollectorApi {
       });
       startPolling(task);
       return task;
+    },
+    async extractTextDocument(file: File) {
+      const form = new FormData();
+      form.append("file", file);
+      return requestJSON<ExtractedTextDocument>("/api/v1/text/extract", {
+        method: "POST",
+        body: form
+      });
     },
     getTask(taskId: string) {
       return requestJSON<WebTask>(`/api/v1/tasks/${encodeURIComponent(taskId)}`);

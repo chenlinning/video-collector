@@ -45,7 +45,7 @@ RUN git clone --depth 1 --branch "v${WHISPER_CPP_VERSION}" https://github.com/gg
 FROM ${ALPINE_IMAGE}
 ARG YTDLP_VERSION
 ARG WHISPER_CPP_VERSION
-RUN apk add --no-cache ca-certificates ffmpeg libgomp libstdc++ python3 py3-pip tzdata && \
+RUN apk add --no-cache antiword ca-certificates ffmpeg libgomp libstdc++ python3 py3-pip tzdata && \
     pip3 install --break-system-packages --no-cache-dir "yt-dlp[default,curl-cffi]==${YTDLP_VERSION}" && \
     yt-dlp --list-impersonate-targets | grep -q curl_cffi && \
     addgroup -S collector && \
@@ -66,6 +66,7 @@ ENV VIDEO_COLLECTOR_LISTEN=0.0.0.0:8787 \
     TMPDIR=/app/cache/tmp \
     YTDLP_PATH=/usr/bin/yt-dlp \
     FFMPEG_PATH=/usr/bin/ffmpeg \
+    ANTIWORD_PATH=/usr/bin/antiword \
     WHISPER_PATH=/usr/local/bin/whisper-cli \
     WHISPER_MODEL_PATH=/app/models/ggml-base.bin \
     WHISPER_VERSION="whisper.cpp ${WHISPER_CPP_VERSION}"

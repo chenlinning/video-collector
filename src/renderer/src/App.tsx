@@ -14,10 +14,12 @@ import { resolveLocale, uiCopy, type Locale } from "./i18n";
 import { downloadMediaCsv, splitBatchUrls } from "./media-export";
 import { loadTheme, saveTheme, type Theme } from "./theme";
 import { buildPreferencesReadyMessage, readParentPreferences, resolveParentOrigin } from "./theme-bridge";
+import TextFormatter from "./TextFormatter";
 import { createWebVideoCollectorApi, saveWebDownload } from "./web-api";
 
 const api = createWebVideoCollectorApi();
-const toolKinds: TaskKind[] = ["media", "audio", "image", "subtitle", "transcript"];
+type ToolKind = TaskKind | "text";
+const toolKinds: ToolKind[] = ["media", "audio", "image", "subtitle", "transcript", "text"];
 const activeStates = new Set(["starting", "downloading", "processing"]);
 type InputMode = "single" | "batch" | "collection" | "file";
 type TaskFilter = "all" | "active" | "completed" | "failed";
@@ -42,8 +44,8 @@ function Icon({ name }: { name: "audio" | "check" | "clock" | "download" | "file
   return <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">{paths[name]}</svg>;
 }
 
-function toolIcon(kind: TaskKind): "audio" | "image" | "subtitle" | "spark" | "video" {
-  return kind === "media" ? "video" : kind === "transcript" ? "spark" : kind;
+function toolIcon(kind: ToolKind): "audio" | "file" | "image" | "subtitle" | "spark" | "video" {
+  return kind === "media" ? "video" : kind === "transcript" ? "spark" : kind === "text" ? "file" : kind;
 }
 
 function formatDuration(seconds: number | undefined, locale: Locale): string {
@@ -100,7 +102,7 @@ function taskFromSnapshot(task: WebTask, title: string): SessionTask {
 export default function App() {
   const [locale, setLocale] = useState<Locale>(() => resolveLocale(window.navigator.language));
   const [theme, setTheme] = useState<Theme>(() => loadTheme(window.localStorage));
-  const [tool, setTool] = useState<TaskKind>("media");
+  const [tool, setTool] = useState<ToolKind>("media");
   const [inputMode, setInputMode] = useState<InputMode>("single");
   const [input, setInput] = useState("");
   const [results, setResults] = useState<MediaInfo[]>([]);
@@ -167,7 +169,7 @@ export default function App() {
     setSelectedFormats({});
   };
 
-  const changeTool = (next: TaskKind) => {
+  const changeTool = (next: ToolKind) => {
     setTool(next);
     if (inputMode === "file" && next !== "transcript") setInputMode("single");
     resetResults();
@@ -183,6 +185,7 @@ export default function App() {
   };
 
   const startTask = async (media: MediaInfo | null, options?: { format?: MediaFormat; resourceId?: string; subtitle?: SubtitleTrack }) => {
+    if (tool === "text") return;
     const sourceUrl = media?.sourceUrl || input.trim();
     if (!sourceUrl) {
       setError(copy.missingUrl);
@@ -278,6 +281,7 @@ export default function App() {
   };
 
   const renderAction = (media: MediaInfo) => {
+    if (tool === "text") return null;
     const images = media.images ?? [];
     const subtitles = media.subtitles ?? [];
     if (tool === "media") {
@@ -336,7 +340,7 @@ export default function App() {
           </button>)}
         </section>
 
-        <div className="main-grid">
+        {tool === "text" ? <TextFormatter locale={locale} extractDocument={(file) => api.extractTextDocument(file)} /> : <div className="main-grid">
           <section className="content-column">
             <section className="composer-card">
               <div className="composer-heading"><div><span className="step-number">01</span><div><h2>{copy.tools[tool]}</h2><p>{copy.toolDescriptions[tool]}</p></div></div></div>
@@ -408,7 +412,7 @@ export default function App() {
 
             <section className="legal-card"><Icon name="check" /><div><strong>{copy.legalTitle}</strong><p>{copy.legalDescription}</p></div></section>
           </aside>
-        </div>
+        </div>}
       </main>
     </div>
   );

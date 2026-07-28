@@ -168,4 +168,23 @@ describe("web video collector API", () => {
 	expect(init?.body).toBeInstanceOf(FormData);
 	expect(new Headers(init?.headers).has("Content-Type")).toBe(false);
   });
+
+  it("extracts an imported text document through the same-origin multipart endpoint", async () => {
+	const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+	  fileName: "article.txt", format: "txt", text: "完整正文", byteSize: 12, characterCount: 4
+	}), { status: 200, headers: { "Content-Type": "application/json" } }));
+	const api = createWebVideoCollectorApi();
+	const file = new File(["完整正文"], "article.txt", { type: "text/plain" });
+
+	const document = await api.extractTextDocument(file);
+
+	expect(document.text).toBe("完整正文");
+	expect(fetchMock).toHaveBeenCalledWith("/api/v1/text/extract", expect.objectContaining({
+	  method: "POST",
+	  credentials: "same-origin"
+	}));
+	const [, init] = fetchMock.mock.calls[0];
+	expect(init?.body).toBeInstanceOf(FormData);
+	expect(new Headers(init?.headers).has("Content-Type")).toBe(false);
+  });
 });
