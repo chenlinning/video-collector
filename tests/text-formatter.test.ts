@@ -4,6 +4,7 @@ import {
   createTextFile,
   formatText,
   joinTextSegments,
+  resolveTextSegment,
   safeTextFileName,
   splitFormattedText
 } from "../src/renderer/src/text-formatter";
@@ -91,6 +92,22 @@ describe("splitFormattedText", () => {
   it("rejects invalid limits", () => {
     expect(() => splitFormattedText("内容", 0)).toThrow("positive integer");
     expect(() => splitFormattedText("内容", 1.5)).toThrow("positive integer");
+  });
+});
+
+describe("resolveTextSegment", () => {
+  const segments = splitFormattedText("第一行\n第二行", 3).segments;
+
+  it("defaults to the first generated segment", () => {
+    expect(resolveTextSegment(segments, null)).toEqual(segments[0]);
+  });
+
+  it("returns only the selected segment", () => {
+    expect(resolveTextSegment(segments, 2)?.text).toBe("第二行");
+  });
+
+  it("returns null when no segments exist", () => {
+    expect(resolveTextSegment([], 1)).toBeNull();
   });
 });
 

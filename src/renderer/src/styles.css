@@ -44,7 +44,7 @@
 * { box-sizing: border-box; }
 html { min-width: 320px; min-height: 100%; background: var(--background); }
 body { margin: 0; min-width: 320px; min-height: 100vh; overflow-x: hidden; }
-button, input, textarea { font: inherit; }
+button, input, textarea, select { font: inherit; }
 button { color: inherit; }
 .icon { width: 18px; height: 18px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 
@@ -85,14 +85,14 @@ button { color: inherit; }
 .retention-callout strong { font-size: 12px; }
 .retention-callout span { color: var(--muted-foreground); font-size: 11px; line-height: 1.55; }
 
-.tool-tabs { margin: 18px 0; display: grid; grid-template-columns: repeat(5, 1fr); gap: 9px; }
-.tool-tabs > button { min-width: 0; min-height: 68px; padding: 12px 13px; display: flex; align-items: center; gap: 10px; text-align: left; border: 1px solid var(--card-border); border-radius: 16px; background: var(--card); box-shadow: var(--shadow-card); cursor: pointer; transition: all .3s ease; }
+.tool-tabs { margin: 18px 0; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
+.tool-tabs > button { min-width: 0; min-height: 56px; padding: 9px 11px; display: flex; align-items: center; gap: 8px; text-align: left; border: 1px solid var(--card-border); border-radius: 13px; background: var(--card); box-shadow: var(--shadow-card); cursor: pointer; transition: all .3s ease; }
 .tool-tabs > button:hover { border-color: var(--border); box-shadow: var(--shadow-card-hover); transform: translateY(-1px); }
 .tool-tabs > button.active { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 12%, var(--card)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 12%, transparent); }
-.tool-tabs > button > .icon { color: var(--brand-soft); }
+.tool-tabs > button > .icon { width: 16px; height: 16px; color: var(--brand-soft); }
 .tool-tabs > button span { min-width: 0; display: grid; gap: 3px; }
-.tool-tabs strong { font-size: 13px; }
-.tool-tabs small { overflow: hidden; color: var(--muted-foreground); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.tool-tabs strong { font-size: 12px; }
+.tool-tabs small { overflow: hidden; color: var(--muted-foreground); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
 
 .main-grid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; align-items: start; gap: 20px; }
 .content-column, .sidebar { min-width: 0; display: grid; align-content: start; gap: 15px; }
@@ -268,10 +268,13 @@ button { color: inherit; }
 .text-notice.success { border: 1px solid color-mix(in srgb, var(--primary) 34%, var(--border)); color: var(--brand-soft); background: color-mix(in srgb, var(--primary) 8%, var(--card)); }
 .text-notice.error { border: 1px solid color-mix(in srgb, var(--destructive) 35%, var(--border)); color: var(--destructive); background: color-mix(in srgb, var(--destructive) 8%, var(--card)); }
 .text-segment-panel { padding: 20px; }
-.segment-controls { flex: none; display: flex; align-items: flex-end; justify-content: flex-end; gap: 8px; }
+.text-segment-panel .text-panel-heading { flex-wrap: wrap; }
+.segment-controls { flex: 1 1 720px; display: flex; align-items: flex-end; justify-content: flex-end; gap: 8px; }
 .segment-controls label { display: grid; gap: 5px; color: var(--muted-foreground); font-size: 8px; }
-.segment-controls input { width: 150px; height: 38px; padding: 0 11px; border: 1px solid var(--input); border-radius: 10px; outline: none; background: var(--card-subtle); color: var(--foreground); }
-.segment-controls input:focus { border-color: var(--ring); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 15%, transparent); }
+.segment-controls input, .segment-controls select { width: 150px; height: 38px; padding: 0 11px; border: 1px solid var(--input); border-radius: 10px; outline: none; background: var(--card-subtle); color: var(--foreground); }
+.segment-controls select { width: 174px; }
+.segment-controls input:focus, .segment-controls select:focus { border-color: var(--ring); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 15%, transparent); }
+.segment-controls select:disabled { cursor: not-allowed; opacity: .55; }
 .segment-controls .primary-button { min-width: 112px; min-height: 38px; }
 .segment-issues { margin-top: 14px; padding: 11px 13px; border: 1px solid color-mix(in srgb, var(--destructive) 35%, var(--border)); border-radius: 11px; color: var(--destructive); background: color-mix(in srgb, var(--destructive) 8%, var(--card)); }
 .segment-issues p { margin: 0; font-size: 9px; line-height: 1.55; }
@@ -331,7 +334,7 @@ button { color: inherit; }
   .text-result-empty { min-height: 300px; }
   .text-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .segment-controls { display: grid; grid-template-columns: 1fr; }
-  .segment-controls label, .segment-controls input, .segment-controls .primary-button, .segment-controls .secondary-button { width: 100%; }
+  .segment-controls label, .segment-controls input, .segment-controls select, .segment-controls .primary-button, .segment-controls .secondary-button { width: 100%; }
   .segment-list { grid-template-columns: 1fr; }
   .segment-card header { align-items: flex-start; flex-direction: column; }
 }

@@ -105,6 +105,10 @@ export function joinTextSegments(segments: readonly TextSegment[]): string {
   return segments.map((segment) => segment.text).join("\n");
 }
 
+export function resolveTextSegment(segments: readonly TextSegment[], selectedIndex: number | null): TextSegment | null {
+  return segments.find((segment) => segment.index === selectedIndex) ?? segments[0] ?? null;
+}
+
 export function safeTextFileName(value: string, fallback = "formatted-text"): string {
   const stem = value
     .replace(/\.[^.]+$/, "")

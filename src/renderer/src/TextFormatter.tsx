@@ -6,6 +6,7 @@ import {
   countTextCharacters,
   formatText,
   joinTextSegments,
+  resolveTextSegment,
   safeTextFileName,
   splitFormattedText,
   type TextFormatResult,
@@ -56,8 +57,10 @@ const textCopy = {
     segmentDescription: "下一行加入将超限时，在该行之前结束当前段；绝不截断完整行。",
     limit: "每段最大字数",
     segment: "生成分段",
+    segmentSelect: "选择分段",
     exportSegments: "依次导出全部分段",
     copySegments: "复制全部分段",
+    copySelectedSegment: "复制分段",
     copySegment: "复制本段",
     exportSegment: "导出本段",
     segmentLabel: (index: number) => `第 ${index} 段`,
@@ -71,6 +74,7 @@ const textCopy = {
     copyFailed: "浏览器未允许写入剪贴板",
     downloadFailed: "浏览器未能创建下载文件",
     segmentsCopied: "全部分段已复制",
+    segmentCopied: (index: number) => `第 ${index} 段已复制`,
     lineTooLong: (issue: TextSegmentIssue) => `第 ${issue.lineNumber} 行共 ${issue.characterCount} 字，超过每段 ${issue.limit} 字限制；请提高字数上限或在原文中增加换行。`,
     imported: (name: string, format: string) => `已完整提取 ${name} · ${format.toUpperCase()}`,
     localOnly: "格式化、分段、复制和导出均在浏览器本地完成。"
@@ -101,8 +105,10 @@ const textCopy = {
     segmentDescription: "If the next line would exceed the limit, the current segment ends before it. Complete lines are never cut.",
     limit: "Maximum characters per segment",
     segment: "Create segments",
+    segmentSelect: "Select segment",
     exportSegments: "Export every segment",
     copySegments: "Copy every segment",
+    copySelectedSegment: "Copy selected",
     copySegment: "Copy segment",
     exportSegment: "Export segment",
     segmentLabel: (index: number) => `Segment ${index}`,
@@ -116,6 +122,7 @@ const textCopy = {
     copyFailed: "Clipboard access was not allowed",
     downloadFailed: "The browser could not create the download file",
     segmentsCopied: "Every segment copied",
+    segmentCopied: (index: number) => `Segment ${index} copied`,
     lineTooLong: (issue: TextSegmentIssue) => `Line ${issue.lineNumber} contains ${issue.characterCount} characters, above the ${issue.limit} limit. Increase the limit or add a source line break.`,
     imported: (name: string, format: string) => `Extracted all readable text from ${name} · ${format.toUpperCase()}`,
     localOnly: "Formatting, segmentation, copying, and export stay in this browser."
@@ -131,15 +138,21 @@ export default function TextFormatter({ locale, extractDocument }: TextFormatter
   const [formatted, setFormatted] = useState<TextFormatResult | null>(null);
   const [limit, setLimit] = useState("1000");
   const [segments, setSegments] = useState<TextSegment[]>([]);
+  const [selectedSegmentIndex, setSelectedSegmentIndex] = useState<number | null>(null);
   const [issues, setIssues] = useState<TextSegmentIssue[]>([]);
   const [isImporting, setIsImporting] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const sourceCharacterCount = useMemo(() => countTextCharacters(source), [source]);
+  const selectedSegment = useMemo(
+    () => resolveTextSegment(segments, selectedSegmentIndex),
+    [segments, selectedSegmentIndex]
+  );
 
   const invalidateResults = () => {
     setFormatted(null);
     setSegments([]);
+    setSelectedSegmentIndex(null);
     setIssues([]);
     setMessage("");
     setError("");
@@ -158,6 +171,7 @@ export default function TextFormatter({ locale, extractDocument }: TextFormatter
     setMessage("");
     setError("");
     setSegments([]);
+    setSelectedSegmentIndex(null);
     setIssues([]);
     setFileInfo({ fileName: file.name, format, byteSize: file.size, status: "extracting" });
     if (file.size > maxTextFileBytes) {
@@ -190,6 +204,7 @@ export default function TextFormatter({ locale, extractDocument }: TextFormatter
     setError("");
     setMessage("");
     setSegments([]);
+    setSelectedSegmentIndex(null);
     setIssues([]);
     const result = formatText(source);
     if (result.characterCount === 0) {
@@ -215,6 +230,9 @@ export default function TextFormatter({ locale, extractDocument }: TextFormatter
       setError(copy.noSource);
       return;
     }
+    setSegments([]);
+    setSelectedSegmentIndex(null);
+    setIssues([]);
     const numericLimit = Number(limit);
     if (!Number.isSafeInteger(numericLimit) || numericLimit < 1 || numericLimit > maxSegmentLimit) {
       setError(copy.invalidLimit);
@@ -222,6 +240,7 @@ export default function TextFormatter({ locale, extractDocument }: TextFormatter
     }
     const result = splitFormattedText(formatted.text, numericLimit);
     setSegments(result.segments);
+    setSelectedSegmentIndex(result.segments[0]?.index ?? null);
     setIssues(result.issues);
     setError(result.issues[0] ? copy.lineTooLong(result.issues[0]) : "");
     setMessage("");
@@ -250,6 +269,20 @@ export default function TextFormatter({ locale, extractDocument }: TextFormatter
 
   const copyAllSegments = () => {
     void copyText(joinTextSegments(segments), copy.segmentsCopied);
+  };
+
+  const copySelectedSegment = () => {
+    if (!selectedSegment) return;
+    void copyText(selectedSegment.text, copy.segmentCopied(selectedSegment.index));
+  };
+
+  const updateLimit = (value: string) => {
+    setLimit(value);
+    setSegments([]);
+    setSelectedSegmentIndex(null);
+    setIssues([]);
+    setMessage("");
+    setError("");
   };
 
   const clearAll = () => {
@@ -308,8 +341,13 @@ export default function TextFormatter({ locale, extractDocument }: TextFormatter
         <div className="text-panel-heading">
           <div><span className="step-number">03</span><div><h3>{copy.segmentTitle}</h3><p>{copy.segmentDescription}</p></div></div>
           <div className="segment-controls">
-            <label>{copy.limit}<input type="number" min="1" max={maxSegmentLimit} step="1" value={limit} onChange={(event) => setLimit(event.target.value)} /></label>
+            <label>{copy.limit}<input type="number" min="1" max={maxSegmentLimit} step="1" value={limit} onChange={(event) => updateLimit(event.target.value)} /></label>
             <button className="primary-button" disabled={!formatted} onClick={handleSegments}>{copy.segment}</button>
+            <label>{copy.segmentSelect}<select disabled={!selectedSegment} value={selectedSegment?.index ?? ""} onChange={(event) => setSelectedSegmentIndex(Number(event.target.value))}>
+              {segments.length === 0 && <option value="">—</option>}
+              {segments.map((segment) => <option key={segment.index} value={segment.index}>{copy.segmentLabel(segment.index)} · {copy.segmentStats(segment.characterCount, segment.lineCount)}</option>)}
+            </select></label>
+            <button className="secondary-button" disabled={!selectedSegment || issues.length > 0} onClick={copySelectedSegment}>{copy.copySelectedSegment}</button>
             <button className="secondary-button" disabled={segments.length === 0 || issues.length > 0} onClick={copyAllSegments}>{copy.copySegments}</button>
             <button className="secondary-button" disabled={segments.length === 0 || issues.length > 0} onClick={exportAllSegments}>{copy.exportSegments}</button>
           </div>
