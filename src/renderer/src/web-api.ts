@@ -14,6 +14,7 @@ import type {
 
 const activeStates = new Set(["queued", "downloading", "processing"]);
 const httpNoContent = 204;
+const apiRoot = "api/v1";
 
 export interface WebVideoCollectorApi extends VideoCollectorApi {
   parseBatch(urls: string[]): Promise<BatchParseItem[]>;
@@ -81,7 +82,7 @@ export function createWebVideoCollectorApi(): WebVideoCollectorApi {
 
   const poll = async (taskId: string) => {
     try {
-      const task = await requestJSON<WebTask>(`/api/v1/tasks/${encodeURIComponent(taskId)}`);
+      const task = await requestJSON<WebTask>(`${apiRoot}/tasks/${encodeURIComponent(taskId)}`);
       emit(task);
       if (activeStates.has(task.state)) {
         pollTimers.set(taskId, setTimeout(() => void poll(taskId), 1000));
@@ -110,20 +111,20 @@ export function createWebVideoCollectorApi(): WebVideoCollectorApi {
 
   return {
     parseUrl(url: string): Promise<MediaInfo> {
-      return requestJSON<MediaInfo>("/api/v1/media/parse", {
+      return requestJSON<MediaInfo>(`${apiRoot}/media/parse`, {
         method: "POST",
         body: JSON.stringify({ url })
       });
     },
     async parseBatch(urls: string[]) {
-      const result = await requestJSON<{ items: BatchParseItem[] }>("/api/v1/media/batch", {
+      const result = await requestJSON<{ items: BatchParseItem[] }>(`${apiRoot}/media/batch`, {
         method: "POST",
         body: JSON.stringify({ urls })
       });
       return result.items;
     },
     parseCollection(url: string) {
-      return requestJSON<CollectionInfo>("/api/v1/collections/parse", {
+      return requestJSON<CollectionInfo>(`${apiRoot}/collections/parse`, {
         method: "POST",
         body: JSON.stringify({ url })
       });
@@ -132,11 +133,11 @@ export function createWebVideoCollectorApi(): WebVideoCollectorApi {
       return "浏览器下载目录";
     },
     async getRuntimeStatus(): Promise<RuntimeStatus> {
-      const status = await requestJSON<Omit<RuntimeStatus, "defaultDownloadDirectory">>("/api/v1/status");
+      const status = await requestJSON<Omit<RuntimeStatus, "defaultDownloadDirectory">>(`${apiRoot}/status`);
       return { ...status, defaultDownloadDirectory: "浏览器下载目录" };
     },
     async startDownload(request: DownloadRequest): Promise<StartDownloadResult> {
-      const task = await requestJSON<WebTask>("/api/v1/tasks", {
+      const task = await requestJSON<WebTask>(`${apiRoot}/tasks`, {
         method: "POST",
         body: JSON.stringify({
           sourceUrl: request.sourceUrl,
@@ -153,7 +154,7 @@ export function createWebVideoCollectorApi(): WebVideoCollectorApi {
       return { taskId: task.id };
     },
     async startTask(request: WebTaskRequest) {
-      const task = await requestJSON<WebTask>("/api/v1/tasks", {
+      const task = await requestJSON<WebTask>(`${apiRoot}/tasks`, {
         method: "POST",
         body: JSON.stringify(request)
       });
@@ -163,7 +164,7 @@ export function createWebVideoCollectorApi(): WebVideoCollectorApi {
     async uploadTranscription(file: File) {
       const form = new FormData();
       form.append("file", file);
-      const task = await requestJSON<WebTask>("/api/v1/transcriptions/upload", {
+      const task = await requestJSON<WebTask>(`${apiRoot}/transcriptions/upload`, {
         method: "POST",
         body: form
       });
@@ -173,16 +174,16 @@ export function createWebVideoCollectorApi(): WebVideoCollectorApi {
     async extractTextDocument(file: File) {
       const form = new FormData();
       form.append("file", file);
-      return requestJSON<ExtractedTextDocument>("/api/v1/text/extract", {
+      return requestJSON<ExtractedTextDocument>(`${apiRoot}/text/extract`, {
         method: "POST",
         body: form
       });
     },
     getTask(taskId: string) {
-      return requestJSON<WebTask>(`/api/v1/tasks/${encodeURIComponent(taskId)}`);
+      return requestJSON<WebTask>(`${apiRoot}/tasks/${encodeURIComponent(taskId)}`);
     },
     async refreshTask(taskId: string) {
-      const task = await requestJSON<WebTask>(`/api/v1/tasks/${encodeURIComponent(taskId)}`);
+      const task = await requestJSON<WebTask>(`${apiRoot}/tasks/${encodeURIComponent(taskId)}`);
       emit(task);
       return task;
     },
@@ -190,7 +191,7 @@ export function createWebVideoCollectorApi(): WebVideoCollectorApi {
       const timer = pollTimers.get(taskId);
       if (timer) clearTimeout(timer);
       pollTimers.delete(taskId);
-      await requestJSON<void>(`/api/v1/tasks/${encodeURIComponent(taskId)}`, { method: "DELETE" });
+      await requestJSON<void>(`${apiRoot}/tasks/${encodeURIComponent(taskId)}`, { method: "DELETE" });
       listeners.forEach((listener) => listener({ taskId, state: "cancelled", percent: 0 }));
       return true;
     },
@@ -245,7 +246,7 @@ export async function saveWebDownload(
   onProgress?: (percent: number) => void
 ): Promise<string | null> {
   const anchor = document.createElement("a");
-  anchor.href = `/api/v1/tasks/${encodeURIComponent(taskId)}/download`;
+  anchor.href = `${apiRoot}/tasks/${encodeURIComponent(taskId)}/download`;
   anchor.download = fileName || "media.bin";
   document.body.append(anchor);
   anchor.click();

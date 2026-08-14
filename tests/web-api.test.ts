@@ -24,7 +24,7 @@ describe("web video collector API", () => {
     const media = await api.parseUrl("https://example.com/video");
 
     expect(media.id).toBe("media-1");
-    expect(fetchMock).toHaveBeenCalledWith("/api/v1/media/parse", expect.objectContaining({
+    expect(fetchMock).toHaveBeenCalledWith("api/v1/media/parse", expect.objectContaining({
       method: "POST",
       credentials: "same-origin"
     }));
@@ -66,6 +66,7 @@ describe("web video collector API", () => {
     await saveWebDownload("task-1", "video.mp4");
 
     expect(append).toHaveBeenCalledWith(anchor);
+    expect(anchor.href).toBe("api/v1/tasks/task-1/download");
     expect(anchor.click).toHaveBeenCalledOnce();
     expect(anchor.remove).toHaveBeenCalledOnce();
   });
@@ -122,11 +123,11 @@ describe("web video collector API", () => {
 	await api.parseBatch(["https://example.com/one"]);
 	await api.parseCollection("https://example.com/list");
 
-	expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/v1/media/batch", expect.objectContaining({
+	expect(fetchMock).toHaveBeenNthCalledWith(1, "api/v1/media/batch", expect.objectContaining({
 	  method: "POST",
 	  body: JSON.stringify({ urls: ["https://example.com/one"] })
 	}));
-	expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/v1/collections/parse", expect.objectContaining({ method: "POST" }));
+	expect(fetchMock).toHaveBeenNthCalledWith(2, "api/v1/collections/parse", expect.objectContaining({ method: "POST" }));
   });
 
   it("starts image, subtitle, audio, and transcript task kinds without changing retention semantics", async () => {
@@ -143,7 +144,7 @@ describe("web video collector API", () => {
 	  resourceId: "cover-large"
 	});
 
-	expect(fetchMock).toHaveBeenCalledWith("/api/v1/tasks", expect.objectContaining({
+	expect(fetchMock).toHaveBeenCalledWith("api/v1/tasks", expect.objectContaining({
 	  method: "POST",
 	  body: JSON.stringify({
 		kind: "image",
@@ -179,7 +180,7 @@ describe("web video collector API", () => {
 	const document = await api.extractTextDocument(file);
 
 	expect(document.text).toBe("完整正文");
-	expect(fetchMock).toHaveBeenCalledWith("/api/v1/text/extract", expect.objectContaining({
+	expect(fetchMock).toHaveBeenCalledWith("api/v1/text/extract", expect.objectContaining({
 	  method: "POST",
 	  credentials: "same-origin"
 	}));

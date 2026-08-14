@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const nginx = readFileSync(new URL("../deploy/nginx/video-collector.ximoai.cn.conf", import.meta.url), "utf8");
+const mainPathNginx = readFileSync(new URL("../deploy/nginx/ximoai-video-collector-location.conf", import.meta.url), "utf8");
 const compose = readFileSync(new URL("../docker-compose.yml", import.meta.url), "utf8");
 const environment = readFileSync(new URL("../.env.example", import.meta.url), "utf8");
 const deployment = readFileSync(new URL("../DEPLOYMENT.md", import.meta.url), "utf8");
@@ -10,6 +11,17 @@ describe("production upload proxy", () => {
   it("accepts the bounded transcription upload without buffering it outside project cache", () => {
     expect(nginx).toContain("client_max_body_size 251m;");
     expect(nginx).toContain("proxy_request_buffering off;");
+  });
+});
+
+describe("main-site path deployment", () => {
+  it("proxies only the dedicated path without defining another host or certificate", () => {
+    expect(mainPathNginx).toContain("location = /video-collector");
+    expect(mainPathNginx).toContain("return 308 /video-collector/;");
+    expect(mainPathNginx).toContain("location ^~ /video-collector/");
+    expect(mainPathNginx).toContain("proxy_pass http://127.0.0.1:8787/;");
+    expect(mainPathNginx).toContain("proxy_request_buffering off;");
+    expect(mainPathNginx).not.toMatch(/\b(server_name|ssl_certificate|listen)\b/);
   });
 });
 
