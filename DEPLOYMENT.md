@@ -1,15 +1,16 @@
 # Video Collector 生产部署指南
 
-> 更新日期：2026-07-26
+> 更新日期：2026-08-14
 > 服务形态：无需登录的匿名公开视频解析与临时下载网站
-> 当前状态：已部署至唯一生产服务器，HTTPS、核心平台与浏览器下载验收通过
+> 当前状态：作为主站独立应用部署在 `https://ximoai.cn/video-collector/`，不使用独立子域名或证书
 
 ## 1. 固定生产目标
 
-- 唯一授权服务器公网 IPv4：`47.251.87.147`
-- 唯一正式网址：`https://video-collector.ximoai.cn`
-- DNS A 记录必须为：`video-collector.ximoai.cn → 47.251.87.147`
-- 未经用户明确修改，不得部署到其他服务器或使用其他正式域名。
+- 唯一授权服务器公网 IPv4：`159.195.234.70`（SSH 别名 `netcup-mnz`）
+- 唯一正式网址：`https://ximoai.cn/video-collector/`
+- 项目作为主站的独立路径应用运行，不再使用独立子域名、DNS 记录或独立证书。
+- 只允许在主站 Nginx 增加独立 `include`；不得修改主站源码或接管主站根路径/API。
+- 未经用户明确修改，不得部署到其他服务器或使用其他正式地址。
 
 ## 2. 部署后提供的能力
 
@@ -88,6 +89,12 @@ video-collector 容器
 └── go.sum
 ```
 
+生产服务器使用分盘存储：
+
+- `/opt/video-collector` 位于系统盘，只保存代码、Compose 配置和 `.env`。
+- `/srv/ximoai-data/video-collector/cache` 位于数据盘，保存全部任务与临时用户数据。
+- `/opt/video-collector/cache` 是上述数据目录的 bind mount；Compose 仍使用 `./cache:/app/cache`，应用内部存储逻辑不变。
+
 创建目录：
 
 ```bash
@@ -152,12 +159,14 @@ VIDEO_COLLECTOR_CN_PROXY_BREAKER_SECONDS=60
 
 ### 5.1 国内临时出口（可选）
 
-相对于 Video Collector，国内服务器只增加临时网络出口，不是第二套生产环境；该服务器可以继续运行已有或后续其他项目。浏览器、Nginx、Go API、任务队列、yt-dlp、FFmpeg、Whisper 和全部媒体临时文件仍只在 `47.251.87.147`。国内服务器不得克隆本仓库、运行本项目容器、挂载本项目缓存或保存本项目媒体文件。
+相对于 Video Collector，国内服务器只增加临时网络出口，不是第二套生产环境；该服务器可以继续运行已有或后续其他项目。浏览器、Nginx、Go API、任务队列、yt-dlp、FFmpeg、Whisper 和全部媒体临时文件只允许位于当前生产服务器 `159.195.234.70`。国内服务器不得克隆本仓库、运行本项目容器、挂载本项目缓存或保存本项目媒体文件。
+
+当前 Netcup 生产部署未迁移旧服务器上的 WireGuard 隧道，必须保持 `VIDEO_COLLECTOR_EGRESS_MODE=off`。如需重新启用国内出口，应以 `159.195.234.70` 为新对端重新执行完整预检、密钥交换、安全组与隔离验收；不得直接复用 `47.251.87.147` 的旧对端配置。
 
 架构：
 
 ```text
-47.251.87.147 上的项目容器
+159.195.234.70 上的项目容器
   ├── 默认：直接访问公开平台
   └── 受控主机且出现地域/IP/网络类失败
         └── 10.77.0.1 → WireGuard → 10.77.0.2:3128 → 公开平台
@@ -191,7 +200,7 @@ deploy/domestic-egress/README.md
 
 安全组和监听要求：
 
-1. 国内服务器 UDP `51820` 只允许来源 `47.251.87.147`。
+1. 重新启用时，国内服务器 UDP `51820` 只允许来源当前生产服务器 `159.195.234.70`。
 2. TCP `3128` 不建立任何公网安全组规则。
 3. Squid 只监听 `10.77.0.2:3128`，只接受来源 `10.77.0.1/32`。
 4. 美国服务器只把 `10.77.0.2/32` 交给 WireGuard，不改变默认路由。
@@ -215,7 +224,7 @@ sudo ss -lntp | grep 10.77.0.2:3128
 
 #### 5.1.2 纯网络 PoC
 
-从 `47.251.87.147` 验证隧道和代理：
+重新配置后，从 `159.195.234.70` 验证隧道和代理：
 
 ```bash
 sudo wg show wg-vc-egress
@@ -282,19 +291,27 @@ curl -fsS http://127.0.0.1:8787/health
 
 ## 6. 缓存目录
 
-项目所有运行缓存必须位于项目根 `cache`：
+项目所有运行缓存的逻辑路径仍为项目根 `cache`，生产服务器通过 bind mount 将其数据落到数据盘：
 
 ```bash
-cd /opt/video-collector
-mkdir -p cache/tasks cache/tmp
-sudo chown -R 100:101 cache
-sudo chmod -R 0750 cache
+sudo install -d -m 0750 /srv/ximoai-data/video-collector/cache/tasks
+sudo install -d -m 0750 /srv/ximoai-data/video-collector/cache/tmp
+sudo chown -R 100:101 /srv/ximoai-data/video-collector/cache
+sudo install -d -m 0755 /opt/video-collector/cache
+sudo mount --bind /srv/ximoai-data/video-collector/cache /opt/video-collector/cache
+```
+
+`/etc/fstab` 固定记录：
+
+```fstab
+/srv/ximoai-data/video-collector/cache /opt/video-collector/cache none bind,nofail,x-systemd.requires-mounts-for=/srv/ximoai-data 0 0
 ```
 
 容器映射：
 
 ```text
-/opt/video-collector/cache  →  /app/cache
+/srv/ximoai-data/video-collector/cache
+        bind mount → /opt/video-collector/cache → /app/cache
 /app/cache/tasks            临时任务与完成文件
 /app/cache/tmp              Python、yt-dlp、FFmpeg 临时目录
 ```
@@ -349,61 +366,49 @@ curl -fsS http://127.0.0.1:8787/health
 仓库已提供：
 
 ```text
-deploy/nginx/video-collector.ximoai.cn.conf
+deploy/nginx/ximoai-video-collector-location.conf
 ```
 
-安装：
+安装为主站的独立 snippet，并只在 `ximoai.cn` 的 HTTPS `server` 块中加入一行 `include`：
 
 ```bash
-sudo cp deploy/nginx/video-collector.ximoai.cn.conf /etc/nginx/sites-available/video-collector.ximoai.cn
-sudo ln -sfn /etc/nginx/sites-available/video-collector.ximoai.cn /etc/nginx/sites-enabled/video-collector.ximoai.cn
+sudo install -m 0644 deploy/nginx/ximoai-video-collector-location.conf \
+  /etc/nginx/snippets/video-collector.conf
+# /etc/nginx/sites-available/ximoai 的 HTTPS server 块：
+# include /etc/nginx/snippets/video-collector.conf;
 sudo nginx -t
 sudo systemctl reload nginx
 ```
 
 关键要求：
 
-- `server_name` 必须是 `video-collector.ximoai.cn`。
-- 只代理到 `http://127.0.0.1:8787`。
+- `/video-collector` 以 308 跳转到 `/video-collector/`。
+- `/video-collector/` 只代理到 `http://127.0.0.1:8787/`；`proxy_pass` 尾斜杠用于去除外部路径前缀。
+- snippet 不包含 `server_name`、`listen` 或证书配置。
+- 主站根 `/`、根 `/api/...` 及其他已有 `location` 不得被项目接管。
 - 传递 `X-Real-IP`、`X-Forwarded-For` 和 `X-Forwarded-Proto`。
+- 传递 `X-Forwarded-Prefix: /video-collector`，并将 Cookie Path 映射到应用路径。
 - 不启用跨域；页面和 API 使用同一域名。
 - 长任务由前端轮询，不需要 WebSocket。
 - `client_max_body_size 251m` 允许 250 MiB 转录文件及 multipart 开销；应用仍执行 250 MiB 硬限制。
 - `proxy_request_buffering off` 将上传直接流式送入项目容器，避免 Nginx 在项目外落地请求体缓存。
 
-## 9. DNS 与 HTTPS
+## 9. 主站域名与 HTTPS
 
-在 DNS 控制台设置：
-
-| 类型 | 主机记录 | 值 |
-|---|---|---|
-| A | `video-collector` | `47.251.87.147` |
-
-确认解析：
+本项目复用主站 `ximoai.cn` 的既有 DNS 和证书，不创建独立 DNS 记录，不运行 Certbot，也不修改证书覆盖范围。上线后确认：
 
 ```bash
-dig +short video-collector.ximoai.cn A
+curl -fsSI https://ximoai.cn/
+curl -fsSI https://ximoai.cn/video-collector
+curl -fsSI https://ximoai.cn/video-collector/
+curl -fsS https://ximoai.cn/video-collector/health
 ```
 
-结果只能包含 `47.251.87.147`。
-
-使用受信任 ACME 客户端签发证书，例如 Certbot：
-
-```bash
-sudo certbot --nginx -d video-collector.ximoai.cn
-sudo certbot renew --dry-run
-```
-
-上线后确认：
-
-```bash
-curl -fsSI https://video-collector.ximoai.cn/
-curl -fsS https://video-collector.ximoai.cn/health
-```
-
-HTTP 必须跳转到 HTTPS，证书必须覆盖正式域名。
+主站必须继续返回 200；无尾斜杠应用地址必须返回 308；应用首页和健康接口必须返回 200。
 
 ## 10. 匿名 API
+
+下表为应用内部路径；公网调用时统一添加 `/video-collector` 前缀。前端使用相对 URL，因此从 `/video-collector/` 打开时不会误请求主站根 API。
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
@@ -421,7 +426,7 @@ HTTP 必须跳转到 HTTPS，证书必须覆盖正式域名。
 解析请求：
 
 ```bash
-curl -fsS https://video-collector.ximoai.cn/api/v1/media/parse \
+curl -fsS https://ximoai.cn/video-collector/api/v1/media/parse \
   -H 'Content-Type: application/json' \
   --data '{"url":"https://www.acfun.cn/v/ac48722683"}'
 ```
@@ -513,7 +518,7 @@ curl -fsS http://127.0.0.1:8787/health
 
 ## 15. 防火墙
 
-阿里云安全组和服务器防火墙：
+服务器防火墙和上游网络策略：
 
 - 22：只允许管理来源 IP。
 - 80：公网开放，用于跳转和证书签发。
@@ -591,9 +596,9 @@ curl -fsS http://127.0.0.1:8787/health
 
 ## 19. 正式上线验收
 
-- [x] A 记录只指向 `47.251.87.147`。
-- [x] 正式地址为 `https://video-collector.ximoai.cn`。
-- [x] HTTPS 有效并自动续期。
+- [x] 复用主站 `ximoai.cn` 的既有 DNS，不创建独立子域名记录。
+- [x] 正式地址为 `https://ximoai.cn/video-collector/`。
+- [x] 复用主站 HTTPS 证书，未运行 Certbot 或创建独立证书。
 - [x] 8787 只绑定本机。
 - [x] Compose 配置展开通过。
 - [x] 容器状态为 `healthy`。
@@ -665,3 +670,18 @@ curl -fsS http://127.0.0.1:8787/health
 - [x] 未修改主站项目；线上交互验收使用主站承载页建立的短期授权会话。
 
 完整需求、实现范围、样本哈希、本地验收和生产验收明细见 `TASK-TEXT-FORMATTER.md` 第 13 节。
+
+## 22. 主站路径部署验收（2026-08-14）
+
+- [x] 生产服务器为 `159.195.234.70`（SSH 别名 `netcup-mnz`，Debian 13）；代码位于系统盘 `/opt/video-collector`。
+- [x] 运行提交为 `aa3800f54a805523cea79d602b452dcd6a0733c9`；GitHub Actions `31785143069` 成功；镜像为 `ghcr.io/chenlinning/video-collector:sha-aa3800f`，OCI 摘要为 `sha256:f567b55361e02960e74b030538856a89c5bcf7fefc30279ee6b61a7e4b454931`。
+- [x] 用户与任务缓存位于数据盘 `/srv/ximoai-data/video-collector/cache`，bind mount 到 `/opt/video-collector/cache`；容器仍使用 `/app/cache/tasks` 与 `/app/cache/tmp`，UID/GID 为 `100:101`，权限为 `0750`。
+- [x] `/etc/fstab` bind mount 已通过 `findmnt --verify`；部署前备份为 `/srv/ximoai-data/deploy-backups/fstab.pre-video-collector-20260814-105224`。
+- [x] 容器为 `running/healthy/0`，镜像标签和 OCI 摘要匹配，`egressStatus=off`；8787 只监听 `127.0.0.1`，从公网访问 `159.195.234.70:8787` 失败。
+- [x] 主站 Nginx 只新增 `include /etc/nginx/snippets/video-collector.conf;`，snippet 来自仓库的路径部署配置；未修改主站源码，未运行 Certbot，未创建独立域名、站点或证书。
+- [x] 主站 Nginx 部署前备份为 `/srv/ximoai-data/deploy-backups/ximoai.pre-video-collector-20260814-105643`；备份 SHA-256 为 `1b1f61e77b6fb3303a8082db62587fa73963845b43fef6895d6254959a97d790`，当前配置 SHA-256 为 `175d4363e7f21c6a35306376002830317d9489eaff28eda70662e5ae15821c2c`。
+- [x] `https://ximoai.cn/` 返回 200；`/video-collector` 返回 308 到 `/video-collector/`；应用首页、`/health` 和带前缀的 `/api/v1/status` 返回 200；主站根 `/api/v1/status` 仍返回原主站 404。
+- [x] 部署前后的既有容器镜像、运行状态、健康状态和重启次数逐项一致；图片站仍返回 302，Agent 站仍返回 307，保留站点配置哈希未变。
+- [x] Chrome 实际打开 `/video-collector/`，标题、六个功能入口和运行时状态正常；文本格式化完成一次标点移除/换行冒烟测试，控制台无错误或警告。
+
+2026-07-26 与 2026-07-28 的独立子域名部署条目保留为历史记录，不再代表当前生产目标。
